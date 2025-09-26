@@ -168,4 +168,17 @@ You'll know it's working when you see:
 - ✅ Database file created in `data/` directory
 - ✅ Processing statistics after feed analysis
 
-**Your RSS Word Counter is now a powerful analytics platform!** 🚀
+**Your RSS Word Counter is now a powerful analytics platform!** 🚀ACode ∙ Version 3 
+The issue is that the www-data user inside the Docker container doesn't have write permissions to the data directory. Here are 3 ways to fix it:
+
+🔧 Quick Fix Option 1 - Fix Host Permissions
+bash
+# Stop container
+docker-compose down
+
+# Fix permissions on your host directories
+sudo chmod -R 777 data logs cache
+
+# Start container
+docker-compose up -d
+
