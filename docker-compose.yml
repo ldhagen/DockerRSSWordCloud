@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  rss-analyzer:
+    build: .
+    container_name: rss-word-counter
+    ports:
+      - "8080:80"
+    volumes:
+      # Persistent data storage
+      - ./data:/var/www/html/data
+      - ./logs:/var/www/html/logs
+      - ./cache:/var/www/html/cache
+      - ./scripts:/var/www/html/scripts
+    environment:
+      # Basic Configuration
+      - PHP_TIMEZONE=America/Chicago
+      - ANALYZER_ENV=docker
+      
+      # Automation Settings
+      - AUTO_COLLECT_ENABLED=true
+      - MAX_FEEDS_PER_RUN=150
+      - COLLECTION_TIMEOUT=2400
+      - RETENTION_DAYS=90
+      
+      # Analysis Settings  
+      - DAILY_ANALYSIS_ENABLED=true
+      - CHANGE_DETECTION_THRESHOLD=50
+      - ALERT_GENERATION=true
+      
+      # Performance Settings
+      - CACHE_DURATION=3600
+      - DB_OPTIMIZE_FREQUENCY=daily
+      - LOG_LEVEL=INFO
+      
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+networks:
+  default:
+    name: rss-analyzer-network
