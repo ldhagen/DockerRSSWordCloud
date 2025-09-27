@@ -1,0 +1,60 @@
+{
+    "feeds": [
+        {
+            "url": "https:\/\/rss.nytimes.com\/services\/xml\/rss\/nyt\/HomePage.xml",
+            "name": "New York Times - Home Page"
+        },
+        {
+            "url": "https:\/\/feeds.bbci.co.uk\/news\/rss.xml",
+            "name": "BBC News"
+        },
+        {
+            "url": "https:\/\/www.theguardian.com\/world\/rss",
+            "name": "The Guardian - World News"
+        },
+        {
+            "url": "https:\/\/www.reuters.com\/feed\/",
+            "name": "Reuters News"
+        },
+        {
+            "url": "https:\/\/feeds.washingtonpost.com\/rss\/business\/technology?itid=lk_inline_manual_25",
+            "name": "WaPo Tech"
+        },
+        {
+            "url": "https:\/\/feeds.washingtonpost.com\/rss\/national?itid=lk_inline_manual_26",
+            "name": "WaPo National"
+        },
+        {
+            "url": "https:\/\/feeds.washingtonpost.com\/rss\/world?itid=lk_inline_manual_27",
+            "name": "WaPo World"
+        },
+        {
+            "url": "https:\/\/feeds.washingtonpost.com\/rss\/business?itid=lk_inline_manual_28",
+            "name": "WaPo Business"
+        },
+        {
+            "url": "https:\/\/search.cnbc.com\/rs\/search\/combinedcms\/view.xml?partnerId=wrss01&id=100003114",
+            "name": "CNBC Top News"
+        },
+        {
+            "url": "https:\/\/search.cnbc.com\/rs\/search\/combinedcms\/view.xml?partnerId=wrss01&id=15839263",
+            "name": "CNBC Top Video"
+        },
+        {
+            "url": "https:\/\/feeds.content.dowjones.io\/public\/rss\/RSSWorldNews",
+            "name": "WSJ World"
+        },
+        {
+            "url": "https:\/\/feeds.content.dowjones.io\/public\/rss\/RSSUSnews",
+            "name": "WSJ US"
+        },
+        {
+            "url": "https:\/\/feeds.content.dowjones.io\/public\/rss\/socialeconomyfeed",
+            "name": "WSJ Economy"
+        },
+        {
+            "url": "https:\/\/feeds.content.dowjones.io\/public\/rss\/WSJcomUSBusiness",
+            "name": "WSJ US Business"
+        }
+    ]
+}

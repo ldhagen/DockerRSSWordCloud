@@ -1,0 +1,16 @@
+[2025-09-27 18:34:55] [INFO] Bulk import: Feeds replaced successfully! Imported 14 feeds.
+[2025-09-27 18:35:38] [INFO] Processed feed: New York Times - Home Page - 22 articles in 0.16s
+[2025-09-27 18:35:38] [INFO] Processed feed: BBC News - 39 articles in 0.35s
+[2025-09-27 18:35:38] [INFO] Processed feed: The Guardian - World News - 45 articles in 0.38s
+[2025-09-27 18:35:38] [ERROR] Failed to process feed: Reuters News
+[2025-09-27 18:35:49] [INFO] Processed feed: WaPo Tech - 4 articles in 10.28s
+[2025-09-27 18:35:59] [INFO] Processed feed: WaPo National - 12 articles in 10.31s
+[2025-09-27 18:36:07] [INFO] Processed feed: WaPo World - 17 articles in 8.21s
+[2025-09-27 18:36:18] [INFO] Processed feed: WaPo Business - 10 articles in 10.24s
+[2025-09-27 18:36:18] [INFO] Processed feed: CNBC Top News - 30 articles in 0.7s
+[2025-09-27 18:36:19] [INFO] Processed feed: CNBC Top Video - 30 articles in 0.32s
+[2025-09-27 18:36:19] [INFO] Processed feed: WSJ World - 75 articles in 0.27s
+[2025-09-27 18:36:19] [INFO] Processed feed: WSJ US - 45 articles in 0.16s
+[2025-09-27 18:36:19] [INFO] Processed feed: WSJ Economy - 36 articles in 0.13s
+[2025-09-27 18:36:19] [INFO] Processed feed: WSJ US Business - 85 articles in 0.14s
+[2025-09-27 18:36:19] [INFO] Processing completed - Total articles: 450, Total words: 508

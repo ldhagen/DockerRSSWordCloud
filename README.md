@@ -303,3 +303,13 @@ MIT License - see LICENSE file for details
 - **Documentation**: Check the `/debug.php` endpoint for system diagnostics
 - **Issues**: Create GitHub issues for bugs and feature requests
 - **Logs**: Monitor `logs/analyzer.log` for application events
+
+
+Fix for stream bug
+
+docker-compose down
+sudo chmod -R 777 data logs cache
+docker-compose up -d
+
+A
+
