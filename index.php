@@ -105,15 +105,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $rss_content = fetch_rss($feed['url']);
                 
                 if ($rss_content) {
-                    $content = parse_rss_content($rss_content);
+                    $content = parse_rss_content($rss_content, TITLES_ONLY_ANALYSIS);
                     $all_content .= ' ' . $content;
                     
                     // Store articles for this feed
                     $feed_articles = extract_articles($rss_content, $feed['name']);
                     $articles = array_merge($articles, $feed_articles);
-                    
+
+                    $feed_word_counts = count_words($content, $stopwords);
+
                     if ($feed_specific) {
-                        $feed_word_counts = count_words($content, $stopwords);
                         $word_counts[$feed['name']] = array_slice($feed_word_counts, 0, $limit);
                         
                         // ENHANCED: Store in database
@@ -124,10 +125,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $processing_log[] = [
                         'feed' => $feed['name'],
                         'articles' => count($feed_articles),
-                        'words' => array_sum($feed_word_counts ?? []),
+                        'words' => array_sum($feed_word_counts),
                         'time' => $processing_time,
                         'status' => 'success'
-                    ];
+                    ]; 
                     
                     log_message("Processed feed: {$feed['name']} - " . count($feed_articles) . " articles in {$processing_time}s");
                 } else {

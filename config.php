@@ -15,6 +15,9 @@ error_reporting(E_ALL);
 // Set timezone
 date_default_timezone_set($_ENV['PHP_TIMEZONE'] ?? 'UTC');
 
+// RSS parsing configuration
+define('TITLES_ONLY_ANALYSIS', true); // Set to false for full content analysis
+
 // Paths - Enhanced for Docker
 define('DATA_DIR', 'data');
 define('LOGS_DIR', 'logs');
@@ -185,9 +188,13 @@ function str_lower($string) {
     return strtolower($string);
 }
 
-// Enhanced RSS parsing (keeping your original logic exactly)
-function parse_rss_content($rss_content) {
+// Enhanced RSS parsing with configurable content selection - DEBUG VERSION
+function parse_rss_content($rss_content, $titles_only = true) {
     $content = '';
+    
+    // Debug: Log function call
+    error_log("parse_rss_content called with titles_only = " . ($titles_only ? 'true' : 'false'));
+    error_log("RSS content length: " . strlen($rss_content));
     
     // Remove CDATA sections
     $rss_content = preg_replace('/<!\[CDATA\[(.*?)\]\]>/is', '$1', $rss_content);
@@ -197,39 +204,58 @@ function parse_rss_content($rss_content) {
     
     // Extract text between item tags
     if (preg_match_all('/<item>(.*?)<\/item>/is', $rss_content, $item_matches)) {
+        error_log("Found " . count($item_matches[1]) . " RSS items");
         foreach ($item_matches[1] as $item) {
-            // Extract title
+            // Always extract title
             if (preg_match('/<title>(.*?)<\/title>/is', $item, $title_match)) {
-                $content .= ' ' . strip_tags($title_match[1]);
+                $title_text = strip_tags($title_match[1]);
+                $content .= ' ' . $title_text;
+                error_log("Extracted title: " . $title_text);
             }
-            // Extract description
-            if (preg_match('/<description>(.*?)<\/description>/is', $item, $desc_match)) {
-                $content .= ' ' . strip_tags($desc_match[1]);
-            }
-            // Extract content:encoded
-            if (preg_match('/<content:encoded>(.*?)<\/content:encoded>/is', $item, $content_match)) {
-                $content .= ' ' . strip_tags($content_match[1]);
+            
+            // Extract additional content only if not titles_only
+            if (!$titles_only) {
+                // Extract description
+                if (preg_match('/<description>(.*?)<\/description>/is', $item, $desc_match)) {
+                    $content .= ' ' . strip_tags($desc_match[1]);
+                }
+                // Extract content:encoded
+                if (preg_match('/<content:encoded>(.*?)<\/content:encoded>/is', $item, $content_match)) {
+                    $content .= ' ' . strip_tags($content_match[1]);
+                }
             }
         }
     } else {
         // Try Atom format
         if (preg_match_all('/<entry>(.*?)<\/entry>/is', $rss_content, $entry_matches)) {
+            error_log("Found " . count($entry_matches[1]) . " Atom entries");
             foreach ($entry_matches[1] as $entry) {
-                // Extract title
+                // Always extract title
                 if (preg_match('/<title>(.*?)<\/title>/is', $entry, $title_match)) {
-                    $content .= ' ' . strip_tags($title_match[1]);
+                    $title_text = strip_tags($title_match[1]);
+                    $content .= ' ' . $title_text;
+                    error_log("Extracted Atom title: " . $title_text);
                 }
-                // Extract summary
-                if (preg_match('/<summary>(.*?)<\/summary>/is', $entry, $summary_match)) {
-                    $content .= ' ' . strip_tags($summary_match[1]);
-                }
-                // Extract content
-                if (preg_match('/<content>(.*?)<\/content>/is', $entry, $content_match)) {
-                    $content .= ' ' . strip_tags($content_match[1]);
+                
+                // Extract additional content only if not titles_only
+                if (!$titles_only) {
+                    // Extract summary
+                    if (preg_match('/<summary>(.*?)<\/summary>/is', $entry, $summary_match)) {
+                        $content .= ' ' . strip_tags($summary_match[1]);
+                    }
+                    // Extract content
+                    if (preg_match('/<content>(.*?)<\/content>/is', $entry, $content_match)) {
+                        $content .= ' ' . strip_tags($content_match[1]);
+                    }
                 }
             }
+        } else {
+            error_log("No RSS items or Atom entries found in feed");
         }
     }
+    
+    error_log("Final extracted content length: " . strlen($content));
+    error_log("Sample content (first 200 chars): " . substr($content, 0, 200));
     
     return $content;
 }
@@ -315,9 +341,14 @@ function extract_articles($rss_content, $feed_name) {
     return $articles;
 }
 
-// Enhanced word counting (keeping your original logic)
+// Enhanced word counting with debug logging
 function count_words($text, $stopwords) {
-    if (empty($text)) return [];
+    error_log("count_words called with text length: " . strlen($text));
+    
+    if (empty($text)) {
+        error_log("Empty text provided to count_words");
+        return [];
+    }
     
     // Convert to lowercase
     $text = str_lower($text);
@@ -327,6 +358,9 @@ function count_words($text, $stopwords) {
     
     // Split into words
     $words = preg_split('/\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
+    
+    error_log("Total words found: " . count($words));
+    error_log("First 10 words: " . implode(', ', array_slice($words, 0, 10)));
     
     // Count words, excluding stopwords
     $word_counts = [];
@@ -341,6 +375,9 @@ function count_words($text, $stopwords) {
         }
         $word_counts[$word]++;
     }
+    
+    error_log("Unique words after filtering: " . count($word_counts));
+    error_log("Top 5 words: " . json_encode(array_slice($word_counts, 0, 5, true)));
     
     // Sort by count descending
     arsort($word_counts);
