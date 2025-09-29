@@ -24,33 +24,29 @@ RUN a2enmod rewrite
 # Set working directory
 WORKDIR /var/www/html
 
-# Copy application files first
+# Copy application files
 COPY . /var/www/html/
+
+# Fix ownership of all files (handles files with wrong ownership from git)
+RUN chown -R www-data:www-data /var/www/html
 
 # Create directories with proper permissions for www-data
 RUN mkdir -p /var/www/html/data \
     && mkdir -p /var/www/html/logs \
     && mkdir -p /var/www/html/cache \
     && mkdir -p /var/www/html/scripts \
-    && chown -R www-data:www-data /var/www/html \
-    && chmod -R 775 /var/www/html \
-    && chmod -R 777 /var/www/html/data \
-    && chmod -R 777 /var/www/html/logs \
-    && chmod -R 777 /var/www/html/cache
+    && chown -R www-data:www-data /var/www/html/data /var/www/html/logs /var/www/html/cache /var/www/html/scripts \
+    && chmod -R 755 /var/www/html \
+    && chmod -R 775 /var/www/html/data \
+    && chmod -R 775 /var/www/html/logs \
+    && chmod -R 775 /var/www/html/cache
 
-# Set up cron job for automated collection
-RUN echo "*/30 * * * * www-data /usr/local/bin/php /var/www/html/scripts/auto_collect.php >> /var/www/html/logs/cron.log 2>&1" > /etc/cron.d/rss-collector
-RUN echo "0 6 * * * www-data /usr/local/bin/php /var/www/html/scripts/daily_analysis.php >> /var/www/html/logs/analysis.log 2>&1" >> /etc/cron.d/rss-collector
-RUN echo "0 2 * * 0 www-data /usr/local/bin/php /var/www/html/scripts/weekly_cleanup.php >> /var/www/html/logs/cleanup.log 2>&1" >> /etc/cron.d/rss-collector
-
-# Set cron permissions
+# Copy cron file and set permissions
+COPY cron-rss-collector /etc/cron.d/rss-collector
 RUN chmod 0644 /etc/cron.d/rss-collector
-RUN crontab /etc/cron.d/rss-collector
 
-# Create startup script
-RUN echo '#!/bin/bash' > /usr/local/bin/start-services.sh \
-    && echo 'service cron start' >> /usr/local/bin/start-services.sh \
-    && echo 'apache2-foreground' >> /usr/local/bin/start-services.sh \
+# Create startup script to run both cron and Apache
+RUN printf '#!/bin/bash\nservice cron start\napache2-foreground\n' > /usr/local/bin/start-services.sh \
     && chmod +x /usr/local/bin/start-services.sh
 
 # Expose port

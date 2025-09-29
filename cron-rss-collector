@@ -1,0 +1,6 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+*/30 * * * * www-data cd /var/www/html && /usr/local/bin/php /var/www/html/scripts/auto_collect.php >> /var/www/html/logs/cron.log 2>&1
+0 6 * * * www-data cd /var/www/html && /usr/local/bin/php /var/www/html/scripts/daily_analysis.php >> /var/www/html/logs/analysis.log 2>&1
+0 2 * * 0 www-data cd /var/www/html && /usr/local/bin/php /var/www/html/scripts/weekly_cleanup.php >> /var/www/html/logs/cleanup.log 2>&1

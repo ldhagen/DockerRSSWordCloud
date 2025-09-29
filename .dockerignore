@@ -1,0 +1,12 @@
+# Don't copy local data directories into image
+data/
+logs/
+cache/
+
+# Git files
+.git/
+.gitignore
+
+# Development files
+*.md
+!README.md
