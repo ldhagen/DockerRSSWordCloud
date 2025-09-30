@@ -1,0 +1,44 @@
+10
+Cron is not running. That's the root problem. The startup script should start it, but it's not working.
+Check if the startup script exists and what it contains:
+bash
+docker
+exec-it
+rss-word-counter
+cat
+/usr/local/bin/start-services.sh
+Then check what command the container is actually running:
+bash
+docker
+exec-it
+rss-word-counter
+ps
+aux
+The issue is likely that the CMD in the Dockerfile isn't executing, or the startup script is failing silently. Let's start cron manually for now:
+bash
+docker
+exec-it
+rss-word-counter
+service cron
+start
+docker
+exec-it
+rss-word-counter
+ps aux
+grep
+cron
+Once cron is running, check if the jobs execute properly:
+bash
+docker
+exec-it
+rss-word-counter
+tail
+-f
+/var/www/html/logs/cron.log
+The fundamental problem is that your container isn't running the startup script that should launch both cron and Apache. We need to figure out why. Check the Docker logs:
+bash
+docker
+logs
+rss-word-counter
+head -20
+This should show what happened when the container started.
