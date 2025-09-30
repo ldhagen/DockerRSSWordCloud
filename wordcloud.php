@@ -113,6 +113,16 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
         .btn:hover {
             background: #1565c0;
         }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .btn-success {
+            background: #388e3c;
+        }
+        .btn-success:hover {
+            background: #2e7d32;
+        }
         .modal {
             display: none;
             position: fixed;
@@ -192,6 +202,26 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
         .nav-btn:hover {
             background: #1565c0;
         }
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-top: 10px;
+            display: none;
+        }
+        .progress-fill {
+            height: 100%;
+            background: #1976d2;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        .export-status {
+            margin-top: 10px;
+            font-weight: bold;
+            color: #1976d2;
+        }
     </style>
 </head>
 <body>
@@ -226,6 +256,15 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             </div>
             <button onclick="updateWordCloud()" class="btn">Update Cloud</button>
             <button onclick="toggleAnimation()" class="btn" id="animationBtn">Pause Animation</button>
+            <button onclick="exportAsImage()" class="btn btn-success">📷 Export as PNG</button>
+            <button onclick="exportAsVideo()" class="btn btn-success" id="exportBtn">🎬 Export as Video</button>
+        </div>
+
+        <div id="exportProgress" style="display: none; padding: 10px; background: #f5f5f5; border-radius: 8px; margin-bottom: 20px;">
+            <div class="export-status" id="exportStatus">Preparing export...</div>
+            <div class="progress-bar" id="progressBar">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
         </div>
 
         <!-- Word Cloud -->
@@ -371,11 +410,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     .transition()
                     .duration(3000)
                     .attr('transform', function() {
-                        const rotate = Math.random() * 10 - 5; // Random rotation between -5 and 5 degrees
+                        const rotate = Math.random() * 10 - 5;
                         return `rotate(${rotate})`;
                     })
                     .on('end', function() {
-                        // Continue animation
                         setTimeout(animateWords, 1000);
                     });
             }
@@ -399,6 +437,222 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             const maxWords = document.getElementById('maxWordsInput').value;
             
             window.location.href = `?days=${days}&min_count=${minCount}&max_words=${maxWords}`;
+        }
+
+        async function exportAsImage() {
+            try {
+                // Pause animation during capture
+                const wasAnimating = animationRunning;
+                if (wasAnimating) {
+                    animationRunning = false;
+                }
+                
+                // Convert SVG to canvas
+                const canvas = await svgToCanvas();
+                
+                // Convert canvas to blob
+                canvas.toBlob(function(blob) {
+                    // Download
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `wordcloud_${new Date().getTime()}.png`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    // Restart animation if it was running
+                    if (wasAnimating) {
+                        animationRunning = true;
+                        animateWords();
+                    }
+                }, 'image/png');
+                
+            } catch (error) {
+                console.error('Export failed:', error);
+                alert('Export failed: ' + error.message);
+            }
+        }
+
+        async function exportAsVideo() {
+            const exportBtn = document.getElementById('exportBtn');
+            const exportProgress = document.getElementById('exportProgress');
+            const exportStatus = document.getElementById('exportStatus');
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            
+            // Disable button during export
+            exportBtn.disabled = true;
+            exportBtn.textContent = 'Recording...';
+            exportProgress.style.display = 'block';
+            progressBar.style.display = 'block';
+            
+            try {
+                // Pause animation during capture
+                const wasAnimating = animationRunning;
+                if (wasAnimating) {
+                    animationRunning = false;
+                }
+                
+                exportStatus.textContent = 'Preparing frames...';
+                progressFill.style.width = '10%';
+                
+                // Pre-capture all frames first to avoid flicker
+                const frames = [];
+                const fps = 20;
+                const duration = 3; // 3 seconds
+                const totalFrames = fps * duration;
+                
+                exportStatus.textContent = 'Capturing animation frames...';
+                
+                for (let frame = 0; frame < totalFrames; frame++) {
+                    const progress = 10 + (frame / totalFrames * 70);
+                    progressFill.style.width = progress + '%';
+                    exportStatus.textContent = `Capturing frame ${frame + 1}/${totalFrames}...`;
+                    
+                    // Animate words
+                    d3.selectAll('.word-cloud-item')
+                        .attr('transform', function(d, idx) {
+                            const t = frame / fps;
+                            const rotate = Math.sin(t * 2 + idx * 0.3) * 10;
+                            const scale = 1 + Math.sin(t * 3 + idx * 0.5) * 0.08;
+                            return `rotate(${rotate}) scale(${scale})`;
+                        });
+                    
+                    // Wait for render
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    
+                    // Capture frame
+                    const canvas = await svgToCanvas();
+                    const imageData = canvas.toDataURL('image/png');
+                    frames.push(imageData);
+                }
+                
+                exportStatus.textContent = 'Creating video from frames...';
+                progressFill.style.width = '85%';
+                
+                // Now create video from pre-captured frames
+                const recordCanvas = document.createElement('canvas');
+                recordCanvas.width = 800;
+                recordCanvas.height = 500;
+                const ctx = recordCanvas.getContext('2d');
+                
+                const stream = recordCanvas.captureStream(fps);
+                const mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'video/webm;codecs=vp9',
+                    videoBitsPerSecond: 5000000
+                });
+                
+                const chunks = [];
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        chunks.push(e.data);
+                    }
+                };
+                
+                mediaRecorder.onstop = () => {
+                    progressFill.style.width = '100%';
+                    exportStatus.textContent = 'Download ready!';
+                    
+                    const blob = new Blob(chunks, { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = `wordcloud_animated_${new Date().getTime()}.webm`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                    
+                    // Reset UI
+                    setTimeout(() => {
+                        exportProgress.style.display = 'none';
+                        exportBtn.disabled = false;
+                        exportBtn.textContent = '🎬 Export as Video';
+                        progressFill.style.width = '0%';
+                        
+                        // Reset word positions
+                        d3.selectAll('.word-cloud-item').attr('transform', '');
+                        
+                        // Restart animation if it was running
+                        if (wasAnimating) {
+                            animationRunning = true;
+                            animateWords();
+                        }
+                    }, 1500);
+                };
+                
+                // Start recording and play frames
+                mediaRecorder.start();
+                
+                let frameIndex = 0;
+                const playFrames = () => {
+                    if (frameIndex >= frames.length) {
+                        // Record a bit longer to ensure all frames are captured
+                        setTimeout(() => {
+                            mediaRecorder.stop();
+                            exportStatus.textContent = 'Finalizing video...';
+                            progressFill.style.width = '95%';
+                        }, 500);
+                        return;
+                    }
+                    
+                    const img = new Image();
+                    img.onload = () => {
+                        ctx.fillStyle = 'white';
+                        ctx.fillRect(0, 0, recordCanvas.width, recordCanvas.height);
+                        ctx.drawImage(img, 0, 0);
+                        
+                        frameIndex++;
+                        setTimeout(playFrames, 1000 / fps);
+                    };
+                    img.src = frames[frameIndex];
+                };
+                
+                playFrames();
+                
+            } catch (error) {
+                console.error('Export failed:', error);
+                exportStatus.textContent = 'Export failed: ' + error.message;
+                exportBtn.disabled = false;
+                exportBtn.textContent = '🎬 Export as Video';
+                
+                // Reset word positions
+                d3.selectAll('.word-cloud-item').attr('transform', '');
+                
+                setTimeout(() => {
+                    exportProgress.style.display = 'none';
+                }, 3000);
+            }
+        }
+        
+        async function svgToCanvas() {
+            const svg = document.getElementById('wordCloudSvg');
+            const canvas = document.createElement('canvas');
+            canvas.width = 800;
+            canvas.height = 500;
+            const ctx = canvas.getContext('2d');
+            
+            // White background
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            // Convert SVG to data URL
+            const svgData = new XMLSerializer().serializeToString(svg);
+            const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
+            const url = URL.createObjectURL(svgBlob);
+            
+            return new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = function() {
+                    ctx.drawImage(img, 0, 0);
+                    URL.revokeObjectURL(url);
+                    resolve(canvas);
+                };
+                img.onerror = reject;
+                img.src = url;
+            });
         }
 
         function showWordDetails(word) {
