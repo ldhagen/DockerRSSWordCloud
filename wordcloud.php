@@ -21,7 +21,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
     $pdo = get_db();
     if ($pdo && $word) {
         try {
-            // Get recent articles containing the word
             $stmt = $pdo->prepare("
                 SELECT DISTINCT a.title, a.link, a.feed_name, a.timestamp
                 FROM articles a
@@ -34,7 +33,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             $stmt->execute([$word]);
             $articles = $stmt->fetchAll(PDO::FETCH_ASSOC);
             
-            // Get trend data
             $trends = get_word_trends($word, 30);
             
             echo json_encode([
@@ -60,6 +58,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
     <title>Interactive Word Cloud</title>
     <link rel="stylesheet" href="css/style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.6.1/d3.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/gifshot@0.4.5/dist/gifshot.min.js"></script>
     <style>
         .wordcloud-container {
             background: white;
@@ -122,6 +121,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
         }
         .btn-success:hover {
             background: #2e7d32;
+        }
+        .btn-warning {
+            background: #f57c00;
+        }
+        .btn-warning:hover {
+            background: #ef6c00;
         }
         .modal {
             display: none;
@@ -234,7 +239,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             </div>
         </div>
 
-        <!-- Controls -->
         <div class="controls-panel">
             <div class="control-group">
                 <label>Time Range:</label>
@@ -258,6 +262,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             <button onclick="toggleAnimation()" class="btn" id="animationBtn">Pause Animation</button>
             <button onclick="exportAsImage()" class="btn btn-success">📷 Export as PNG</button>
             <button onclick="exportAsVideo()" class="btn btn-success" id="exportBtn">🎬 Export as Video</button>
+            <button onclick="exportAsGif()" class="btn btn-warning" id="exportGifBtn">🎞️ Export as GIF</button>
         </div>
 
         <div id="exportProgress" style="display: none; padding: 10px; background: #f5f5f5; border-radius: 8px; margin-bottom: 20px;">
@@ -267,7 +272,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             </div>
         </div>
 
-        <!-- Word Cloud -->
         <div class="wordcloud-container">
             <?php if (empty($trending_words)): ?>
                 <div style="padding: 100px 0;">
@@ -279,7 +283,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             <?php endif; ?>
         </div>
 
-        <!-- Statistics -->
         <?php if (!empty($trending_words)): ?>
         <div class="analytics-card">
             <h3>Word Cloud Statistics</h3>
@@ -301,7 +304,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
         <?php endif; ?>
     </div>
 
-    <!-- Word Details Modal -->
     <div id="wordModal" class="modal">
         <div class="modal-content">
             <span class="close" onclick="closeModal()">&times;</span>
@@ -314,14 +316,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
         const wordData = <?= json_encode(array_values($trending_words)) ?>;
         let animationRunning = true;
         
-        // Only create word cloud if we have data
         if (wordData.length > 0) {
-            // Color scales
             const colorScale = d3.scaleOrdinal()
                 .domain(['high', 'medium', 'low'])
                 .range(['#1976d2', '#388e3c', '#f57c00', '#d32f2f', '#7b1fa2', '#0097a7']);
 
-            // Create word cloud
             function createWordCloud() {
                 const svg = d3.select('#wordCloudSvg');
                 svg.selectAll("*").remove();
@@ -331,14 +330,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                 const centerX = width / 2;
                 const centerY = height / 2;
                 
-                // Calculate font sizes
                 const maxCount = Math.max(...wordData.map(d => d.total_count));
                 const minCount = Math.min(...wordData.map(d => d.total_count));
                 const fontScale = d3.scaleLinear()
                     .domain([minCount, maxCount])
                     .range([12, 48]);
                 
-                // Create word elements
                 const words = svg.selectAll('.word-cloud-item')
                     .data(wordData)
                     .enter()
@@ -356,7 +353,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     })
                     .on('mouseover', function(event, d) {
                         d3.select(this).style('opacity', 0.7);
-                        // Show tooltip
                         const tooltip = d3.select('body').append('div')
                             .attr('class', 'tooltip')
                             .style('position', 'absolute')
@@ -375,7 +371,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                         d3.selectAll('.tooltip').remove();
                     });
 
-                // Position words in a spiral pattern
                 let angle = 0;
                 let radius = 30;
                 
@@ -390,14 +385,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     angle += 0.5;
                     radius += 1.5;
                     
-                    // Reset radius if getting too far from center
                     if (radius > 200) {
                         radius = 30;
                         angle += 1;
                     }
                 });
 
-                // Add animation
                 if (animationRunning) {
                     animateWords();
                 }
@@ -418,7 +411,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     });
             }
 
-            // Initialize word cloud
             createWordCloud();
         }
 
@@ -441,18 +433,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
 
         async function exportAsImage() {
             try {
-                // Pause animation during capture
                 const wasAnimating = animationRunning;
                 if (wasAnimating) {
                     animationRunning = false;
                 }
                 
-                // Convert SVG to canvas
                 const canvas = await svgToCanvas();
                 
-                // Convert canvas to blob
                 canvas.toBlob(function(blob) {
-                    // Download
                     const url = URL.createObjectURL(blob);
                     const a = document.createElement('a');
                     a.href = url;
@@ -462,7 +450,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                     
-                    // Restart animation if it was running
                     if (wasAnimating) {
                         animationRunning = true;
                         animateWords();
@@ -475,6 +462,116 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             }
         }
 
+        async function exportAsGif() {
+            const exportGifBtn = document.getElementById('exportGifBtn');
+            const exportProgress = document.getElementById('exportProgress');
+            const exportStatus = document.getElementById('exportStatus');
+            const progressBar = document.getElementById('progressBar');
+            const progressFill = document.getElementById('progressFill');
+            
+            exportGifBtn.disabled = true;
+            exportGifBtn.textContent = 'Creating GIF...';
+            exportProgress.style.display = 'block';
+            progressBar.style.display = 'block';
+            
+            try {
+                const wasAnimating = animationRunning;
+                if (wasAnimating) {
+                    animationRunning = false;
+                }
+                
+                exportStatus.textContent = 'Capturing animation frames...';
+                progressFill.style.width = '10%';
+                
+                const images = [];
+                const fps = 10;
+                const duration = 3;
+                const totalFrames = fps * duration;
+                
+                for (let frame = 0; frame < totalFrames; frame++) {
+                    const progress = 10 + (frame / totalFrames * 60);
+                    progressFill.style.width = progress + '%';
+                    exportStatus.textContent = `Capturing frame ${frame + 1}/${totalFrames}...`;
+                    
+                    d3.selectAll('.word-cloud-item')
+                        .attr('transform', function(d, idx) {
+                            const t = frame / fps;
+                            const rotate = Math.sin(t * 2 + idx * 0.3) * 10;
+                            const scale = 1 + Math.sin(t * 3 + idx * 0.5) * 0.08;
+                            return `rotate(${rotate}) scale(${scale})`;
+                        });
+                    
+                    await new Promise(resolve => setTimeout(resolve, 50));
+                    
+                    const canvas = await svgToCanvas();
+                    images.push(canvas.toDataURL('image/png'));
+                }
+                
+                exportStatus.textContent = 'Creating GIF from frames...';
+                progressFill.style.width = '75%';
+                
+                gifshot.createGIF({
+                    images: images,
+                    gifWidth: 800,
+                    gifHeight: 500,
+                    interval: 0.1,
+                    numFrames: totalFrames,
+                    frameDuration: 1,
+                    sampleInterval: 10,
+                    numWorkers: 2
+                }, function(obj) {
+                    if (!obj.error) {
+                        exportStatus.textContent = 'Preparing download...';
+                        progressFill.style.width = '95%';
+                        
+                        fetch(obj.image)
+                            .then(res => res.blob())
+                            .then(blob => {
+                                const url = URL.createObjectURL(blob);
+                                const a = document.createElement('a');
+                                a.href = url;
+                                a.download = `wordcloud_animated_${new Date().getTime()}.gif`;
+                                document.body.appendChild(a);
+                                a.click();
+                                document.body.removeChild(a);
+                                URL.revokeObjectURL(url);
+                                
+                                exportStatus.textContent = 'GIF download complete!';
+                                progressFill.style.width = '100%';
+                                
+                                setTimeout(() => {
+                                    exportProgress.style.display = 'none';
+                                    exportGifBtn.disabled = false;
+                                    exportGifBtn.textContent = '🎞️ Export as GIF';
+                                    progressFill.style.width = '0%';
+                                    
+                                    d3.selectAll('.word-cloud-item').attr('transform', '');
+                                    
+                                    if (wasAnimating) {
+                                        animationRunning = true;
+                                        animateWords();
+                                    }
+                                }, 2000);
+                            });
+                    } else {
+                        throw new Error(obj.error);
+                    }
+                });
+                
+            } catch (error) {
+                console.error('GIF export failed:', error);
+                exportStatus.textContent = 'Export failed: ' + error.message;
+                exportGifBtn.disabled = false;
+                exportGifBtn.textContent = '🎞️ Export as GIF';
+                
+                d3.selectAll('.word-cloud-item').attr('transform', '');
+                
+                setTimeout(() => {
+                    exportProgress.style.display = 'none';
+                }, 3000);
+            }
+        }
+
         async function exportAsVideo() {
             const exportBtn = document.getElementById('exportBtn');
             const exportProgress = document.getElementById('exportProgress');
@@ -482,14 +579,12 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             const progressBar = document.getElementById('progressBar');
             const progressFill = document.getElementById('progressFill');
             
-            // Disable button during export
             exportBtn.disabled = true;
             exportBtn.textContent = 'Recording...';
             exportProgress.style.display = 'block';
             progressBar.style.display = 'block';
             
             try {
-                // Pause animation during capture
                 const wasAnimating = animationRunning;
                 if (wasAnimating) {
                     animationRunning = false;
@@ -498,10 +593,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                 exportStatus.textContent = 'Preparing frames...';
                 progressFill.style.width = '10%';
                 
-                // Pre-capture all frames first to avoid flicker
                 const frames = [];
                 const fps = 20;
-                const duration = 3; // 3 seconds
+                const duration = 3;
                 const totalFrames = fps * duration;
                 
                 exportStatus.textContent = 'Capturing animation frames...';
@@ -511,7 +605,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     progressFill.style.width = progress + '%';
                     exportStatus.textContent = `Capturing frame ${frame + 1}/${totalFrames}...`;
                     
-                    // Animate words
                     d3.selectAll('.word-cloud-item')
                         .attr('transform', function(d, idx) {
                             const t = frame / fps;
@@ -520,10 +613,8 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                             return `rotate(${rotate}) scale(${scale})`;
                         });
                     
-                    // Wait for render
                     await new Promise(resolve => setTimeout(resolve, 50));
                     
-                    // Capture frame
                     const canvas = await svgToCanvas();
                     const imageData = canvas.toDataURL('image/png');
                     frames.push(imageData);
@@ -532,7 +623,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                 exportStatus.textContent = 'Creating video from frames...';
                 progressFill.style.width = '85%';
                 
-                // Now create video from pre-captured frames
                 const recordCanvas = document.createElement('canvas');
                 recordCanvas.width = 800;
                 recordCanvas.height = 500;
@@ -565,17 +655,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                     
-                    // Reset UI
                     setTimeout(() => {
                         exportProgress.style.display = 'none';
                         exportBtn.disabled = false;
                         exportBtn.textContent = '🎬 Export as Video';
                         progressFill.style.width = '0%';
                         
-                        // Reset word positions
                         d3.selectAll('.word-cloud-item').attr('transform', '');
                         
-                        // Restart animation if it was running
                         if (wasAnimating) {
                             animationRunning = true;
                             animateWords();
@@ -583,13 +670,11 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     }, 1500);
                 };
                 
-                // Start recording and play frames
                 mediaRecorder.start();
                 
                 let frameIndex = 0;
                 const playFrames = () => {
                     if (frameIndex >= frames.length) {
-                        // Record a bit longer to ensure all frames are captured
                         setTimeout(() => {
                             mediaRecorder.stop();
                             exportStatus.textContent = 'Finalizing video...';
@@ -618,7 +703,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                 exportBtn.disabled = false;
                 exportBtn.textContent = '🎬 Export as Video';
                 
-                // Reset word positions
                 d3.selectAll('.word-cloud-item').attr('transform', '');
                 
                 setTimeout(() => {
@@ -634,11 +718,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             canvas.height = 500;
             const ctx = canvas.getContext('2d');
             
-            // White background
             ctx.fillStyle = 'white';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             
-            // Convert SVG to data URL
             const svgData = new XMLSerializer().serializeToString(svg);
             const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
             const url = URL.createObjectURL(svgBlob);
@@ -670,7 +752,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                     
                     let content = '<div class="word-details">';
                     
-                    // Articles section
                     if (data.articles && data.articles.length > 0) {
                         content += '<h3>Recent Articles</h3>';
                         data.articles.forEach(article => {
@@ -685,7 +766,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
                         content += '<h3>No recent articles found</h3>';
                     }
                     
-                    // Trend information
                     if (data.trends && data.trends.length > 0) {
                         const totalMentions = data.trends.reduce((sum, trend) => sum + parseInt(trend.total_count), 0);
                         content += `<h3>Trend Summary (Last 30 Days)</h3>`;
@@ -705,7 +785,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             document.getElementById('wordModal').style.display = 'none';
         }
 
-        // Close modal when clicking outside
         window.onclick = function(event) {
             const modal = document.getElementById('wordModal');
             if (event.target === modal) {
