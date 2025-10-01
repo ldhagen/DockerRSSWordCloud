@@ -95,7 +95,9 @@ function init_database() {
         // Create indexes for better performance
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_word_history_word ON word_history (word)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_word_history_timestamp ON word_history (timestamp)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_word_history_feed ON word_history (feed_name)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_collections_timestamp ON collections (timestamp)");
+        $pdo->exec("CREATE INDEX IF NOT EXISTS idx_collections_feed ON collections (feed_name)");
         
         return $pdo;
     } catch (PDOException $e) {
@@ -188,13 +190,9 @@ function str_lower($string) {
     return strtolower($string);
 }
 
-// Enhanced RSS parsing with configurable content selection - DEBUG VERSION
+// Enhanced RSS parsing with configurable content selection
 function parse_rss_content($rss_content, $titles_only = true) {
     $content = '';
-    
-    // Debug: Log function call
-    error_log("parse_rss_content called with titles_only = " . ($titles_only ? 'true' : 'false'));
-    error_log("RSS content length: " . strlen($rss_content));
     
     // Remove CDATA sections
     $rss_content = preg_replace('/<!\[CDATA\[(.*?)\]\]>/is', '$1', $rss_content);
@@ -204,13 +202,11 @@ function parse_rss_content($rss_content, $titles_only = true) {
     
     // Extract text between item tags
     if (preg_match_all('/<item>(.*?)<\/item>/is', $rss_content, $item_matches)) {
-        error_log("Found " . count($item_matches[1]) . " RSS items");
         foreach ($item_matches[1] as $item) {
             // Always extract title
             if (preg_match('/<title>(.*?)<\/title>/is', $item, $title_match)) {
                 $title_text = strip_tags($title_match[1]);
                 $content .= ' ' . $title_text;
-                error_log("Extracted title: " . $title_text);
             }
             
             // Extract additional content only if not titles_only
@@ -228,13 +224,11 @@ function parse_rss_content($rss_content, $titles_only = true) {
     } else {
         // Try Atom format
         if (preg_match_all('/<entry>(.*?)<\/entry>/is', $rss_content, $entry_matches)) {
-            error_log("Found " . count($entry_matches[1]) . " Atom entries");
             foreach ($entry_matches[1] as $entry) {
                 // Always extract title
                 if (preg_match('/<title>(.*?)<\/title>/is', $entry, $title_match)) {
                     $title_text = strip_tags($title_match[1]);
                     $content .= ' ' . $title_text;
-                    error_log("Extracted Atom title: " . $title_text);
                 }
                 
                 // Extract additional content only if not titles_only
@@ -249,13 +243,8 @@ function parse_rss_content($rss_content, $titles_only = true) {
                     }
                 }
             }
-        } else {
-            error_log("No RSS items or Atom entries found in feed");
         }
     }
-    
-    error_log("Final extracted content length: " . strlen($content));
-    error_log("Sample content (first 200 chars): " . substr($content, 0, 200));
     
     return $content;
 }
@@ -341,12 +330,9 @@ function extract_articles($rss_content, $feed_name) {
     return $articles;
 }
 
-// Enhanced word counting with debug logging
+// Enhanced word counting
 function count_words($text, $stopwords) {
-    error_log("count_words called with text length: " . strlen($text));
-    
     if (empty($text)) {
-        error_log("Empty text provided to count_words");
         return [];
     }
     
@@ -358,9 +344,6 @@ function count_words($text, $stopwords) {
     
     // Split into words
     $words = preg_split('/\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
-    
-    error_log("Total words found: " . count($words));
-    error_log("First 10 words: " . implode(', ', array_slice($words, 0, 10)));
     
     // Count words, excluding stopwords
     $word_counts = [];
@@ -376,20 +359,18 @@ function count_words($text, $stopwords) {
         $word_counts[$word]++;
     }
     
-    error_log("Unique words after filtering: " . count($word_counts));
-    error_log("Top 5 words: " . json_encode(array_slice($word_counts, 0, 5, true)));
-    
     // Sort by count descending
     arsort($word_counts);
     return $word_counts;
 }
 
-// NEW FUNCTIONS - Analytics Features
-
-// Store collection data to database
+// Store collection data to database - ENHANCED VERSION
 function store_collection_data($feed_name, $articles, $word_counts) {
     $pdo = get_db();
-    if (!$pdo) return false;
+    if (!$pdo) {
+        error_log("store_collection_data: No database connection");
+        return false;
+    }
     
     try {
         $pdo->beginTransaction();
@@ -403,29 +384,38 @@ function store_collection_data($feed_name, $articles, $word_counts) {
         $stmt->execute([$feed_name, count($articles), $total_words]);
         $collection_id = $pdo->lastInsertId();
         
-        // Insert word history
-        $stmt = $pdo->prepare("
-            INSERT INTO word_history (collection_id, word, count, feed_name) 
-            VALUES (?, ?, ?, ?)
-        ");
-        foreach ($word_counts as $word => $count) {
-            $stmt->execute([$collection_id, $word, $count, $feed_name]);
+        // Insert word history - BATCH INSERT for better performance
+        if (!empty($word_counts)) {
+            $stmt = $pdo->prepare("
+                INSERT INTO word_history (collection_id, word, count, feed_name) 
+                VALUES (?, ?, ?, ?)
+            ");
+            
+            $batch_count = 0;
+            foreach ($word_counts as $word => $count) {
+                $stmt->execute([$collection_id, $word, $count, $feed_name]);
+                $batch_count++;
+            }
+            
+            error_log("Stored $batch_count words for collection $collection_id ($feed_name)");
         }
         
         // Insert articles
-        $stmt = $pdo->prepare("
-            INSERT INTO articles (collection_id, title, link, description, feed_name, pub_date) 
-            VALUES (?, ?, ?, ?, ?, ?)
-        ");
-        foreach ($articles as $article) {
-            $stmt->execute([
-                $collection_id,
-                $article['title'],
-                $article['link'],
-                $article['description'],
-                $article['feed'],
-                $article['pub_date'] ?? null
-            ]);
+        if (!empty($articles)) {
+            $stmt = $pdo->prepare("
+                INSERT INTO articles (collection_id, title, link, description, feed_name, pub_date) 
+                VALUES (?, ?, ?, ?, ?, ?)
+            ");
+            foreach ($articles as $article) {
+                $stmt->execute([
+                    $collection_id,
+                    $article['title'],
+                    $article['link'],
+                    $article['description'],
+                    $article['feed'],
+                    $article['pub_date'] ?? null
+                ]);
+            }
         }
         
         $pdo->commit();
@@ -438,19 +428,33 @@ function store_collection_data($feed_name, $articles, $word_counts) {
 }
 
 // Get word trends over time
-function get_word_trends($word, $days = 30) {
+function get_word_trends($word, $days = 30, $feed = null) {
     $pdo = get_db();
     if (!$pdo) return [];
     
     try {
-        $stmt = $pdo->prepare("
-            SELECT DATE(timestamp) as date, SUM(count) as total_count
-            FROM word_history 
-            WHERE word = ? AND timestamp > datetime('now', '-' || ? || ' days')
-            GROUP BY DATE(timestamp)
-            ORDER BY date
-        ");
-        $stmt->execute([$word, $days]);
+        if ($feed) {
+            $stmt = $pdo->prepare("
+                SELECT DATE(timestamp) as date, SUM(count) as total_count
+                FROM word_history 
+                WHERE LOWER(word) = LOWER(?) 
+                AND feed_name = ?
+                AND timestamp > datetime('now', '-' || ? || ' days')
+                GROUP BY DATE(timestamp)
+                ORDER BY date
+            ");
+            $stmt->execute([$word, $feed, $days]);
+        } else {
+            $stmt = $pdo->prepare("
+                SELECT DATE(timestamp) as date, SUM(count) as total_count
+                FROM word_history 
+                WHERE LOWER(word) = LOWER(?)
+                AND timestamp > datetime('now', '-' || ? || ' days')
+                GROUP BY DATE(timestamp)
+                ORDER BY date
+            ");
+            $stmt->execute([$word, $days]);
+        }
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log("Failed to get word trends: " . $e->getMessage());

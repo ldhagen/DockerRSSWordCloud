@@ -23,7 +23,7 @@ if (!isset($_SESSION['form_state'])) {
         'selected_feeds' => [],
         'limit' => 50,
         'feed_specific' => false,
-        'feeds_data' => $feeds_data['feeds'] // Store the actual feed data for checkboxes
+        'feeds_data' => $feeds_data['feeds']
     ];
 }
 
@@ -48,7 +48,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'name' => $name
             ];
             save_json(FEEDS_FILE, $feeds_data);
-            // Update session with new feeds data
             $_SESSION['form_state']['feeds_data'] = $feeds_data['feeds'];
             log_message("New feed added: $name ($url)");
         }
@@ -61,7 +60,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $removed_feed = $feeds_data['feeds'][$index];
             array_splice($feeds_data['feeds'], $index, 1);
             save_json(FEEDS_FILE, $feeds_data);
-            // Update session with updated feeds data
             $_SESSION['form_state']['feeds_data'] = $feeds_data['feeds'];
             log_message("Feed removed: " . $removed_feed['name']);
         }
@@ -88,11 +86,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     
-    // Process RSS feeds - ENHANCED VERSION
+    // Process RSS feeds - FIXED VERSION
     if (isset($_POST['process_feeds'])) {
         $limit = (int)($_POST['limit'] ?? 50);
         $selected_feeds = $_POST['feeds'] ?? [];
         $feed_specific = isset($_POST['feed_specific']);
+        $use_cache = isset($_POST['use_cache']);
         
         $all_content = '';
         $articles = [];
@@ -102,7 +101,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         foreach ($feeds_data['feeds'] as $index => $feed) {
             if (empty($selected_feeds) || in_array($index, $selected_feeds)) {
                 $start_time = microtime(true);
-                $rss_content = fetch_rss($feed['url']);
+                $rss_content = fetch_rss($feed['url'], $use_cache);
                 
                 if ($rss_content) {
                     $content = parse_rss_content($rss_content, TITLES_ONLY_ANALYSIS);
@@ -114,11 +113,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $feed_word_counts = count_words($content, $stopwords);
 
+                    // CRITICAL FIX: ALWAYS store individual feed data in database for analytics
+                    $collection_id = store_collection_data($feed['name'], $feed_articles, $feed_word_counts);
+
                     if ($feed_specific) {
+                        // Show individual feed counts in UI
                         $word_counts[$feed['name']] = array_slice($feed_word_counts, 0, $limit);
-                        
-                        // ENHANCED: Store in database
-                        store_collection_data($feed['name'], $feed_articles, $feed_word_counts);
                     }
                     
                     $processing_time = round(microtime(true) - $start_time, 2);
@@ -126,16 +126,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'feed' => $feed['name'],
                         'articles' => count($feed_articles),
                         'words' => array_sum($feed_word_counts),
+                        'unique_words' => count($feed_word_counts),
                         'time' => $processing_time,
-                        'status' => 'success'
+                        'status' => 'success',
+                        'collection_id' => $collection_id
                     ]; 
                     
-                    log_message("Processed feed: {$feed['name']} - " . count($feed_articles) . " articles in {$processing_time}s");
+                    log_message("Processed feed: {$feed['name']} - " . count($feed_articles) . " articles, " . count($feed_word_counts) . " unique words in {$processing_time}s (Collection ID: $collection_id)");
                 } else {
                     $processing_log[] = [
                         'feed' => $feed['name'],
                         'articles' => 0,
                         'words' => 0,
+                        'unique_words' => 0,
                         'time' => 0,
                         'status' => 'failed'
                     ];
@@ -148,14 +151,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $all_word_counts = count_words($all_content, $stopwords);
             $word_counts['all'] = array_slice($all_word_counts, 0, $limit);
             
-            // ENHANCED: Store combined data
-            store_collection_data('Combined Feeds', $articles, $all_word_counts);
+            // Store combined data
+            $combined_collection_id = store_collection_data('Combined Feeds', $articles, $all_word_counts);
+            log_message("Stored combined feed data (Collection ID: $combined_collection_id)");
         }
         
         // Store results and form state in session
         $_SESSION['word_counts'] = $word_counts;
         $_SESSION['articles'] = $articles;
-        $_SESSION['processing_log'] = $processing_log; // NEW: Store processing stats
+        $_SESSION['processing_log'] = $processing_log;
         $_SESSION['form_state'] = [
             'selected_feeds' => $selected_feeds,
             'limit' => $limit,
@@ -169,7 +173,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $limit = $form_state['limit'];
         $feed_specific = $form_state['feed_specific'];
         
-        log_message("Processing completed - Total articles: " . count($articles) . ", Total words: " . array_sum(array_map('array_sum', $word_counts)));
+        $total_articles = count($articles);
+        $total_word_entries = array_sum(array_map('array_sum', $word_counts));
+        log_message("Processing completed - Total articles: $total_articles, Total word entries: $total_word_entries");
     }
 }
 
@@ -231,7 +237,7 @@ function generate_url_with_state($params = []) {
         .stat-item {
             display: inline-block;
             margin: 5px 15px 5px 0;
-            padding: 5px 10px;
+            padding: 8px 12px;
             background: white;
             border-radius: 4px;
             border-left: 4px solid #1976d2;
@@ -246,22 +252,28 @@ function generate_url_with_state($params = []) {
             margin: 10px 0;
             font-size: 0.9em;
         }
+        .cache-checkbox {
+            margin: 10px 0;
+            padding: 10px;
+            background: #fff3cd;
+            border-radius: 4px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>📰 RSS Word Counter - Enhanced</h1>
+        <h1>RSS Word Counter - Enhanced</h1>
         
         <!-- Navigation -->
         <div class="nav-buttons">
-            <a href="analytics.php" class="nav-btn">📊 Analytics Dashboard</a>
-            <a href="wordcloud.php" class="nav-btn">🎨 Word Cloud</a>
+            <a href="analytics.php" class="nav-btn">Analytics Dashboard</a>
+            <a href="wordcloud.php" class="nav-btn">Word Cloud</a>
         </div>
 
         <!-- Database Status -->
         <?php if (get_db()): ?>
             <div class="database-info">
-                ✅ Enhanced analytics enabled - Data is being stored for trend analysis
+                Enhanced analytics enabled - All feed data is automatically stored for trend analysis
             </div>
         <?php endif; ?>
         
@@ -332,7 +344,7 @@ function generate_url_with_state($params = []) {
 
         <!-- Process Feeds -->
         <div class="section">
-            <h2>🔄 Process RSS Feeds</h2>
+            <h2>Process RSS Feeds</h2>
             <form method="post">
                 <input type="hidden" name="feed_collapsed" id="process-feed-collapsed" value="<?= $feed_collapsed ? '1' : '0' ?>">
                 <input type="hidden" name="stopword_collapsed" id="process-stopword-collapsed" value="<?= $stopword_collapsed ? '1' : '0' ?>">
@@ -352,10 +364,17 @@ function generate_url_with_state($params = []) {
                     <?php endforeach; ?>
                 </div>
                 
+                <div class="cache-checkbox">
+                    <label>
+                        <input type="checkbox" name="use_cache" value="1">
+                        Use cache (faster but may show older data - uncheck to force fresh data)
+                    </label>
+                </div>
+                
                 <div class="form-group">
                     <label>
                         <input type="checkbox" name="feed_specific" value="1" <?= $feed_specific ? 'checked' : '' ?>>
-                        Show counts per feed (stores individual feed data)
+                        Show counts per feed in UI (data is always stored per feed for analytics)
                     </label>
                 </div>
                 
@@ -365,7 +384,7 @@ function generate_url_with_state($params = []) {
                 </div>
                 
                 <button type="submit" name="process_feeds" style="background: #4caf50; padding: 12px 24px; font-size: 16px;">
-                    🚀 Process Feeds & Store Analytics
+                    Process Feeds & Store Analytics
                 </button>
             </form>
         </div>
@@ -373,24 +392,37 @@ function generate_url_with_state($params = []) {
         <!-- Processing Statistics -->
         <?php if (isset($_SESSION['processing_log'])): ?>
             <div class="processing-stats">
-                <h3>📊 Processing Results</h3>
-                <?php foreach ($_SESSION['processing_log'] as $log): ?>
+                <h3>Processing Results</h3>
+                <?php 
+                $total_stored = 0;
+                foreach ($_SESSION['processing_log'] as $log): 
+                    if ($log['status'] === 'success' && isset($log['collection_id'])) {
+                        $total_stored++;
+                    }
+                ?>
                     <div class="stat-item <?= $log['status'] === 'success' ? 'stat-success' : 'stat-error' ?>">
                         <strong><?= sanitize_output($log['feed']) ?></strong>: 
                         <?php if ($log['status'] === 'success'): ?>
-                            <?= $log['articles'] ?> articles, <?= number_format($log['words']) ?> words (<?= $log['time'] ?>s)
+                            <?= $log['articles'] ?> articles, <?= number_format($log['words']) ?> words 
+                            (<?= number_format($log['unique_words']) ?> unique) in <?= $log['time'] ?>s
+                            <?php if (isset($log['collection_id'])): ?>
+                                <br><small>Stored in database (ID: <?= $log['collection_id'] ?>)</small>
+                            <?php endif; ?>
                         <?php else: ?>
-                            ❌ Failed to fetch
+                            Failed to fetch
                         <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
+                <div style="margin-top: 10px; padding: 10px; background: #e3f2fd; border-radius: 4px;">
+                    <strong>Total feeds stored for analytics: <?= $total_stored ?></strong>
+                </div>
             </div>
         <?php endif; ?>
 
         <!-- Results -->
         <?php if (!empty($word_counts)): ?>
             <div class="section">
-                <h2>📈 Word Count Results</h2>
+                <h2>Word Count Results</h2>
                 
                 <?php if ($feed_specific): ?>
                     <?php foreach ($word_counts as $feed_name => $counts): ?>
@@ -419,9 +451,9 @@ function generate_url_with_state($params = []) {
                 
                 <!-- Enhanced Actions -->
                 <div style="margin-top: 20px; padding: 15px; background: #f0f8ff; border-radius: 8px;">
-                    <p><strong>🎯 Explore Your Results:</strong></p>
-                    <a href="analytics.php" class="nav-btn" style="margin-right: 10px;">📊 View Trends & Analytics</a>
-                    <a href="wordcloud.php" class="nav-btn">🎨 Interactive Word Cloud</a>
+                    <p><strong>Explore Your Results:</strong></p>
+                    <a href="analytics.php" class="nav-btn" style="margin-right: 10px;">View Trends & Analytics</a>
+                    <a href="wordcloud.php" class="nav-btn">Interactive Word Cloud</a>
                 </div>
             </div>
         <?php endif; ?>
@@ -429,7 +461,7 @@ function generate_url_with_state($params = []) {
         <!-- Word Articles -->
         <?php if (!empty($word_articles)): ?>
             <div class="section">
-                <h2>📰 Articles containing "<?= sanitize_output($search_word) ?>"</h2>
+                <h2>Articles containing "<?= sanitize_output($search_word) ?>"</h2>
                 <div class="article-list">
                     <?php foreach ($word_articles as $article): ?>
                         <div class="article-item">
@@ -440,7 +472,7 @@ function generate_url_with_state($params = []) {
                     <?php endforeach; ?>
                 </div>
                 <div style="margin-top: 20px;">
-                    <a href="<?= generate_url_with_state(['word' => null]) ?>" class="btn-back">← Back to Results</a>
+                    <a href="<?= generate_url_with_state(['word' => null]) ?>" class="btn-back">Back to Results</a>
                 </div>
             </div>
         <?php endif; ?>
@@ -448,9 +480,10 @@ function generate_url_with_state($params = []) {
         <!-- Quick Start Guide -->
         <?php if (empty($word_counts)): ?>
             <div class="section" style="background: #f8f9fa; border-left: 5px solid #1976d2;">
-                <h3>🚀 Quick Start Guide</h3>
+                <h3>Quick Start Guide</h3>
                 <ol>
                     <li><strong>Select Feeds:</strong> Choose which RSS feeds to analyze above</li>
+                    <li><strong>Uncheck "Use cache":</strong> For fresh data (first time or testing)</li>
                     <li><strong>Click Process:</strong> Hit the "Process Feeds" button</li>
                     <li><strong>Explore Results:</strong> View word frequencies and click words to see source articles</li>
                     <li><strong>Analyze Trends:</strong> Visit the Analytics Dashboard to see word trends over time</li>
@@ -473,7 +506,7 @@ function generate_url_with_state($params = []) {
         
         function toggleSection(sectionId) {
             const section = document.getElementById(sectionId);
-            const toggle = document.getElementById(sectionId.replace('-', '-') + (sectionId.includes('feed') ? '' : '') + 'toggle');
+            const toggle = document.getElementById(sectionId.replace('-management', '-toggle'));
             
             if (section.style.display === 'none') {
                 section.style.display = 'block';

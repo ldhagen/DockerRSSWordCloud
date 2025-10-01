@@ -1,7 +1,7 @@
 <?php
 require_once 'config.php';
 
-// Handle AJAX requests for charts
+// Handle AJAX requests for charts and data
 if (isset($_GET['ajax'])) {
     header('Content-Type: application/json');
     
@@ -9,15 +9,47 @@ if (isset($_GET['ajax'])) {
         case 'word_trends':
             $word = $_GET['word'] ?? '';
             $days = (int)($_GET['days'] ?? 30);
-            echo json_encode(get_word_trends($word, $days));
+            $feed = $_GET['feed'] ?? null;
+            echo json_encode(get_word_trends($word, $days, $feed));
             break;
             
         case 'feed_activity':
-            echo json_encode(get_feed_activity(30));
+            $days = (int)($_GET['days'] ?? 30);
+            echo json_encode(get_feed_activity($days));
             break;
             
         case 'daily_stats':
-            echo json_encode(get_daily_stats(30));
+            $days = (int)($_GET['days'] ?? 30);
+            $feed = $_GET['feed'] ?? null;
+            echo json_encode(get_daily_stats($days, $feed));
+            break;
+            
+        case 'word_details':
+            $word = $_GET['word'] ?? '';
+            $days = (int)($_GET['days'] ?? 30);
+            echo json_encode(get_word_details($word, $days));
+            break;
+            
+        case 'feed_words':
+            $feed = $_GET['feed'] ?? '';
+            $days = (int)($_GET['days'] ?? 30);
+            echo json_encode(get_feed_specific_words($feed, $days));
+            break;
+            
+        case 'word_cooccurrence':
+            $word = $_GET['word'] ?? '';
+            $days = (int)($_GET['days'] ?? 30);
+            echo json_encode(get_word_cooccurrence($word, $days));
+            break;
+            
+        case 'search_articles':
+            $keyword = $_GET['keyword'] ?? '';
+            $feed = $_GET['feed'] ?? null;
+            echo json_encode(search_articles($keyword, $feed));
+            break;
+            
+        case 'feed_list':
+            echo json_encode(get_feed_list());
             break;
     }
     exit;
@@ -26,6 +58,7 @@ if (isset($_GET['ajax'])) {
 // Get analytics data
 $trending_words = get_trending_words(7, 50);
 $recent_collections = get_recent_collections(10);
+$feed_list = get_feed_list();
 
 function get_recent_collections($limit = 10) {
     $pdo = get_db();
@@ -70,24 +103,179 @@ function get_feed_activity($days = 30) {
     }
 }
 
-function get_daily_stats($days = 30) {
+function get_daily_stats($days = 30, $feed = null) {
+    $pdo = get_db();
+    if (!$pdo) return [];
+    
+    try {
+        if ($feed) {
+            $stmt = $pdo->prepare("
+                SELECT 
+                    DATE(timestamp) as date,
+                    COUNT(*) as collections,
+                    SUM(total_articles) as articles,
+                    SUM(total_words) as words
+                FROM collections 
+                WHERE timestamp > datetime('now', '-' || ? || ' days')
+                AND feed_name = ?
+                GROUP BY DATE(timestamp)
+                ORDER BY date
+            ");
+            $stmt->execute([$days, $feed]);
+        } else {
+            $stmt = $pdo->prepare("
+                SELECT 
+                    DATE(timestamp) as date,
+                    COUNT(*) as collections,
+                    SUM(total_articles) as articles,
+                    SUM(total_words) as words
+                FROM collections 
+                WHERE timestamp > datetime('now', '-' || ? || ' days')
+                GROUP BY DATE(timestamp)
+                ORDER BY date
+            ");
+            $stmt->execute([$days]);
+        }
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        return [];
+    }
+}
+
+function get_word_details($word, $days = 30) {
     $pdo = get_db();
     if (!$pdo) return [];
     
     try {
         $stmt = $pdo->prepare("
             SELECT 
-                DATE(timestamp) as date,
-                COUNT(*) as collections,
-                SUM(total_articles) as articles,
-                SUM(total_words) as words
-            FROM collections 
-            WHERE timestamp > datetime('now', '-' || ? || ' days')
-            GROUP BY DATE(timestamp)
-            ORDER BY date
+                feed_name,
+                SUM(count) as total_mentions,
+                COUNT(DISTINCT DATE(timestamp)) as days_appeared,
+                MAX(timestamp) as last_seen
+            FROM word_history
+            WHERE LOWER(word) = LOWER(?)
+            AND timestamp > datetime('now', '-' || ? || ' days')
+            GROUP BY feed_name
+            ORDER BY total_mentions DESC
         ");
-        $stmt->execute([$days]);
+        $stmt->execute([$word, $days]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error in get_word_details: " . $e->getMessage());
+        return [];
+    }
+}
+
+function get_feed_specific_words($feed, $days = 30, $limit = 30) {
+    $pdo = get_db();
+    if (!$pdo) return [];
+    
+    try {
+        $stmt = $pdo->prepare("
+            SELECT 
+                word,
+                SUM(count) as total_count,
+                COUNT(DISTINCT DATE(timestamp)) as days_appeared
+            FROM word_history
+            WHERE feed_name = ?
+            AND timestamp > datetime('now', '-' || ? || ' days')
+            GROUP BY word
+            ORDER BY total_count DESC
+            LIMIT ?
+        ");
+        $stmt->execute([$feed, $days, $limit]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error in get_feed_specific_words: " . $e->getMessage());
+        return [];
+    }
+}
+
+function get_word_cooccurrence($word, $days = 30, $limit = 20) {
+    $pdo = get_db();
+    if (!$pdo) return [];
+    
+    try {
+        $stmt = $pdo->prepare("
+            SELECT 
+                w2.word,
+                COUNT(DISTINCT w2.collection_id) as cooccurrence_count,
+                SUM(w2.count) as total_mentions
+            FROM word_history w1
+            JOIN word_history w2 ON w1.collection_id = w2.collection_id
+            WHERE LOWER(w1.word) = LOWER(?)
+            AND LOWER(w2.word) != LOWER(?)
+            AND w1.timestamp > datetime('now', '-' || ? || ' days')
+            GROUP BY w2.word
+            ORDER BY cooccurrence_count DESC, total_mentions DESC
+            LIMIT ?
+        ");
+        $stmt->execute([$word, $word, $days, $limit]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error in get_word_cooccurrence: " . $e->getMessage());
+        return [];
+    }
+}
+
+function search_articles($keyword, $feed = null) {
+    $pdo = get_db();
+    if (!$pdo) return [];
+    
+    try {
+        if ($feed) {
+            $stmt = $pdo->prepare("
+                SELECT 
+                    c.feed_name,
+                    c.total_articles,
+                    c.timestamp,
+                    GROUP_CONCAT(w.word || ':' || w.count) as word_data
+                FROM collections c
+                JOIN word_history w ON c.id = w.collection_id
+                WHERE (LOWER(w.word) LIKE LOWER(?) OR LOWER(c.feed_name) LIKE LOWER(?))
+                AND c.feed_name = ?
+                GROUP BY c.id
+                ORDER BY c.timestamp DESC
+                LIMIT 50
+            ");
+            $search = "%{$keyword}%";
+            $stmt->execute([$search, $search, $feed]);
+        } else {
+            $stmt = $pdo->prepare("
+                SELECT 
+                    c.feed_name,
+                    c.total_articles,
+                    c.timestamp,
+                    GROUP_CONCAT(w.word || ':' || w.count) as word_data
+                FROM collections c
+                JOIN word_history w ON c.id = w.collection_id
+                WHERE LOWER(w.word) LIKE LOWER(?) OR LOWER(c.feed_name) LIKE LOWER(?)
+                GROUP BY c.id
+                ORDER BY c.timestamp DESC
+                LIMIT 50
+            ");
+            $search = "%{$keyword}%";
+            $stmt->execute([$search, $search]);
+        }
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error in search_articles: " . $e->getMessage());
+        return [];
+    }
+}
+
+function get_feed_list() {
+    $pdo = get_db();
+    if (!$pdo) return [];
+    
+    try {
+        $stmt = $pdo->query("
+            SELECT DISTINCT feed_name 
+            FROM collections 
+            ORDER BY feed_name
+        ");
+        return $stmt->fetchAll(PDO::FETCH_COLUMN);
     } catch (PDOException $e) {
         return [];
     }
@@ -115,6 +303,9 @@ function get_daily_stats($days = 30) {
             padding: 20px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
+        .full-width {
+            grid-column: 1 / -1;
+        }
         .chart-container {
             position: relative;
             height: 300px;
@@ -129,14 +320,17 @@ function get_daily_stats($days = 30) {
         .word-tag {
             background: #e3f2fd;
             color: #1976d2;
-            padding: 4px 8px;
+            padding: 6px 12px;
             border-radius: 16px;
-            font-size: 12px;
+            font-size: 13px;
             cursor: pointer;
-            transition: background-color 0.2s;
+            transition: all 0.2s;
         }
         .word-tag:hover {
-            background: #bbdefb;
+            background: #1976d2;
+            color: white;
+            transform: translateY(-2px);
+            box-shadow: 0 2px 8px rgba(25,118,210,0.3);
         }
         .stats-row {
             display: flex;
@@ -154,11 +348,14 @@ function get_daily_stats($days = 30) {
             display: flex;
             gap: 10px;
             align-items: center;
+            flex-wrap: wrap;
         }
-        .word-input {
+        .word-input, select {
             padding: 8px 12px;
             border: 1px solid #ddd;
             border-radius: 4px;
+        }
+        .word-input {
             width: 200px;
         }
         .btn {
@@ -169,9 +366,16 @@ function get_daily_stats($days = 30) {
             border-radius: 4px;
             cursor: pointer;
             text-decoration: none;
+            transition: background 0.2s;
         }
         .btn:hover {
             background: #1565c0;
+        }
+        .btn-secondary {
+            background: #666;
+        }
+        .btn-secondary:hover {
+            background: #555;
         }
         table {
             width: 100%;
@@ -187,28 +391,172 @@ function get_daily_stats($days = 30) {
             background-color: #f5f5f5;
             font-weight: bold;
         }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.5);
+            animation: fadeIn 0.3s;
+        }
+        .modal-content {
+            background-color: white;
+            margin: 5% auto;
+            padding: 30px;
+            border-radius: 8px;
+            width: 80%;
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+            animation: slideDown 0.3s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+        @keyframes slideDown {
+            from { transform: translateY(-50px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        .close {
+            color: #aaa;
+            float: right;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .close:hover {
+            color: #000;
+        }
+        .detail-section {
+            margin: 20px 0;
+        }
+        .detail-item {
+            padding: 10px;
+            background: #f5f5f5;
+            margin: 8px 0;
+            border-radius: 4px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .related-words {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin: 10px 0;
+        }
+        .related-tag {
+            background: #fff3e0;
+            color: #f57c00;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .related-tag:hover {
+            background: #f57c00;
+            color: white;
+        }
+        .filter-bar {
+            background: #f5f5f5;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .filter-label {
+            font-weight: bold;
+            margin-right: 5px;
+        }
+        .active-filter {
+            background: #4caf50;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .clear-filter {
+            cursor: pointer;
+            font-weight: bold;
+        }
+        .search-results {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .search-item {
+            padding: 12px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .search-item:hover {
+            background: #f5f5f5;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+        .badge {
+            background: #ff9800;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            margin-left: 5px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-            <h1>📊 RSS Analytics Dashboard</h1>
+            <h1>RSS Analytics Dashboard</h1>
             <div>
-                <a href="index.php" class="btn">← Back to Main</a>
-                <a href="wordcloud.php" class="btn">🎨 Word Cloud</a>
+                <a href="index.php" class="btn">Back to Main</a>
+                <a href="wordcloud.php" class="btn">Word Cloud</a>
             </div>
+        </div>
+
+        <!-- Filter Bar -->
+        <div class="filter-bar">
+            <span class="filter-label">Filters:</span>
+            <select id="feedFilter" onchange="applyFilters()">
+                <option value="">All Feeds</option>
+                <?php foreach ($feed_list as $feed): ?>
+                    <option value="<?= htmlspecialchars($feed) ?>"><?= htmlspecialchars($feed) ?></option>
+                <?php endforeach; ?>
+            </select>
+            <select id="dateRangeFilter" onchange="applyFilters()">
+                <option value="7">Last 7 days</option>
+                <option value="14">Last 14 days</option>
+                <option value="30" selected>Last 30 days</option>
+                <option value="90">Last 90 days</option>
+            </select>
+            <button onclick="clearFilters()" class="btn btn-secondary">Clear Filters</button>
+            <div id="activeFilters" style="margin-left: auto;"></div>
         </div>
 
         <!-- Trending Words Section -->
         <div class="analytics-card">
-            <h2>🔥 Trending Words (Last 7 Days)</h2>
+            <h2>Trending Words <span id="trendingPeriod">(Last 7 Days)</span></h2>
             <div class="trending-words">
                 <?php if (empty($trending_words)): ?>
                     <p>No trending words yet. <a href="index.php">Process some feeds</a> to see analytics!</p>
                 <?php else: ?>
                     <?php foreach (array_slice($trending_words, 0, 30) as $word_data): ?>
-                        <span class="word-tag" onclick="showWordTrend('<?= sanitize_output($word_data['word']) ?>')" title="<?= $word_data['total_count'] ?> mentions across <?= $word_data['feed_count'] ?> feeds">
-                            <?= sanitize_output($word_data['word']) ?> (<?= $word_data['total_count'] ?>)
+                        <span class="word-tag" onclick="showWordDetails('<?= sanitize_output($word_data['word']) ?>')" title="Click for detailed analysis">
+                            <?= sanitize_output($word_data['word']) ?> 
+                            <span class="badge"><?= $word_data['total_count'] ?></span>
                         </span>
                     <?php endforeach; ?>
                 <?php endif; ?>
@@ -219,7 +567,7 @@ function get_daily_stats($days = 30) {
         <div class="analytics-grid">
             <!-- Daily Activity Chart -->
             <div class="analytics-card">
-                <h3>📈 Daily Activity (Last 30 Days)</h3>
+                <h3>Daily Activity</h3>
                 <div class="chart-container">
                     <canvas id="dailyChart"></canvas>
                 </div>
@@ -227,18 +575,19 @@ function get_daily_stats($days = 30) {
 
             <!-- Feed Activity Chart -->
             <div class="analytics-card">
-                <h3>📰 Feed Activity</h3>
+                <h3>Feed Distribution</h3>
                 <div class="chart-container">
                     <canvas id="feedChart"></canvas>
                 </div>
             </div>
 
             <!-- Word Trend Analysis -->
-            <div class="analytics-card">
-                <h3>🔍 Word Trend Analysis</h3>
+            <div class="analytics-card full-width">
+                <h3>Word Trend Analysis</h3>
                 <div class="controls">
                     <input type="text" id="wordInput" class="word-input" placeholder="Enter word to analyze">
                     <button onclick="analyzeWord()" class="btn">Analyze</button>
+                    <button onclick="compareWords()" class="btn btn-secondary">Compare</button>
                     <select id="trendDays" onchange="analyzeWord()">
                         <option value="7">7 days</option>
                         <option value="14">14 days</option>
@@ -246,14 +595,28 @@ function get_daily_stats($days = 30) {
                         <option value="90">90 days</option>
                     </select>
                 </div>
-                <div class="chart-container">
+                <div class="chart-container" style="height: 400px;">
                     <canvas id="trendChart"></canvas>
                 </div>
+                <div id="relatedWords" class="detail-section" style="display: none;">
+                    <h4>Related Words (Co-occurrence)</h4>
+                    <div class="related-words" id="relatedWordsList"></div>
+                </div>
+            </div>
+
+            <!-- Article Search -->
+            <div class="analytics-card full-width">
+                <h3>Search Articles</h3>
+                <div class="controls">
+                    <input type="text" id="searchInput" class="word-input" placeholder="Search by keyword...">
+                    <button onclick="searchArticles()" class="btn">Search</button>
+                </div>
+                <div id="searchResults" class="search-results"></div>
             </div>
 
             <!-- Feed Statistics -->
             <div class="analytics-card">
-                <h3>📊 Feed Statistics</h3>
+                <h3>Feed Statistics</h3>
                 <div id="feedStats">
                     <?php
                     $feed_activity = get_feed_activity(30);
@@ -262,7 +625,7 @@ function get_daily_stats($days = 30) {
                         <p>No feed activity yet. <a href="index.php">Process some feeds</a> to see statistics!</p>
                     <?php else: ?>
                         <?php foreach ($feed_activity as $feed): ?>
-                            <div class="stats-row">
+                            <div class="stats-row" style="cursor: pointer;" onclick="showFeedDetails('<?= sanitize_output($feed['feed_name']) ?>')">
                                 <span><?= sanitize_output($feed['feed_name']) ?></span>
                                 <span class="stat-value"><?= number_format($feed['total_articles']) ?> articles</span>
                             </div>
@@ -270,116 +633,187 @@ function get_daily_stats($days = 30) {
                     <?php endif; ?>
                 </div>
             </div>
-        </div>
 
-        <!-- Recent Collections -->
-        <div class="analytics-card">
-            <h3>⏰ Recent Collections</h3>
-            <?php if (empty($recent_collections)): ?>
-                <p>No collections yet. <a href="index.php">Process some feeds</a> to see recent activity!</p>
-            <?php else: ?>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Feed</th>
-                            <th style="text-align: right;">Articles</th>
-                            <th style="text-align: right;">Words</th>
-                            <th style="text-align: right;">Time</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($recent_collections as $collection): ?>
+            <!-- Recent Collections -->
+            <div class="analytics-card">
+                <h3>Recent Collections</h3>
+                <?php if (empty($recent_collections)): ?>
+                    <p>No collections yet. <a href="index.php">Process some feeds</a> to see recent activity!</p>
+                <?php else: ?>
+                    <table>
+                        <thead>
                             <tr>
-                                <td><?= sanitize_output($collection['feed_name']) ?></td>
-                                <td style="text-align: right;"><?= number_format($collection['total_articles']) ?></td>
-                                <td style="text-align: right;"><?= number_format($collection['total_words']) ?></td>
-                                <td style="text-align: right;"><?= date('M j, H:i', strtotime($collection['timestamp'])) ?></td>
+                                <th>Feed</th>
+                                <th style="text-align: right;">Articles</th>
+                                <th style="text-align: right;">Time</th>
                             </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php endif; ?>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($recent_collections as $collection): ?>
+                                <tr style="cursor: pointer;" onclick="showFeedDetails('<?= sanitize_output($collection['feed_name']) ?>')">
+                                    <td><?= sanitize_output($collection['feed_name']) ?></td>
+                                    <td style="text-align: right;"><?= number_format($collection['total_articles']) ?></td>
+                                    <td style="text-align: right;"><?= date('M j, H:i', strtotime($collection['timestamp'])) ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                <?php endif; ?>
+            </div>
+        </div>
+    </div>
+
+    <!-- Word Details Modal -->
+    <div id="wordModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('wordModal')">&times;</span>
+            <h2 id="modalWordTitle"></h2>
+            <div id="modalWordContent" class="loading">Loading...</div>
+        </div>
+    </div>
+
+    <!-- Feed Details Modal -->
+    <div id="feedModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModal('feedModal')">&times;</span>
+            <h2 id="modalFeedTitle"></h2>
+            <div id="modalFeedContent" class="loading">Loading...</div>
         </div>
     </div>
 
     <script>
-        // Initialize charts
         let dailyChart = null;
         let feedChart = null;
         let trendChart = null;
+        let currentFilters = {
+            feed: null,
+            dateRange: 30
+        };
 
-        // Load daily activity chart
-        fetch('?ajax=daily_stats&days=30')
-            .then(response => response.json())
-            .then(data => {
-                const ctx = document.getElementById('dailyChart').getContext('2d');
-                dailyChart = new Chart(ctx, {
-                    type: 'line',
-                    data: {
-                        labels: data.map(d => d.date),
-                        datasets: [{
-                            label: 'Articles Collected',
-                            data: data.map(d => d.articles),
-                            borderColor: '#1976d2',
-                            backgroundColor: 'rgba(25, 118, 210, 0.1)',
-                            tension: 0.1
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        scales: {
-                            y: {
-                                beginAtZero: true
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDailyChart();
+            loadFeedChart();
+        });
+
+        function applyFilters() {
+            currentFilters.feed = document.getElementById('feedFilter').value || null;
+            currentFilters.dateRange = parseInt(document.getElementById('dateRangeFilter').value);
+            
+            updateActiveFilters();
+            loadDailyChart();
+            loadFeedChart();
+        }
+
+        function clearFilters() {
+            document.getElementById('feedFilter').value = '';
+            document.getElementById('dateRangeFilter').value = '30';
+            currentFilters = { feed: null, dateRange: 30 };
+            updateActiveFilters();
+            loadDailyChart();
+            loadFeedChart();
+        }
+
+        function updateActiveFilters() {
+            const container = document.getElementById('activeFilters');
+            let html = '';
+            if (currentFilters.feed) {
+                html += `<span class="active-filter">${currentFilters.feed} <span class="clear-filter" onclick="clearFeedFilter()">✕</span></span>`;
+            }
+            container.innerHTML = html;
+        }
+
+        function clearFeedFilter() {
+            document.getElementById('feedFilter').value = '';
+            applyFilters();
+        }
+
+        function loadDailyChart() {
+            const url = `?ajax=daily_stats&days=${currentFilters.dateRange}` + 
+                        (currentFilters.feed ? `&feed=${encodeURIComponent(currentFilters.feed)}` : '');
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (dailyChart) dailyChart.destroy();
+                    
+                    const ctx = document.getElementById('dailyChart').getContext('2d');
+                    dailyChart = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            labels: data.map(d => d.date),
+                            datasets: [{
+                                label: 'Articles Collected',
+                                data: data.map(d => d.articles),
+                                borderColor: '#1976d2',
+                                backgroundColor: 'rgba(25, 118, 210, 0.1)',
+                                tension: 0.1,
+                                fill: true
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            scales: {
+                                y: { beginAtZero: true }
+                            },
+                            plugins: {
+                                legend: { display: false }
                             }
                         }
-                    }
+                    });
                 });
-            });
+        }
 
-        // Load feed activity chart
-        fetch('?ajax=feed_activity&days=30')
-            .then(response => response.json())
-            .then(data => {
-                const ctx = document.getElementById('feedChart').getContext('2d');
-                feedChart = new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: data.map(d => d.feed_name),
-                        datasets: [{
-                            data: data.map(d => d.total_articles),
-                            backgroundColor: [
-                                '#1976d2', '#388e3c', '#f57c00', '#d32f2f',
-                                '#7b1fa2', '#0097a7', '#5d4037', '#616161',
-                                '#e64a19', '#1565c0', '#2e7d32', '#f9a825'
-                            ]
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'bottom'
+        function loadFeedChart() {
+            fetch(`?ajax=feed_activity&days=${currentFilters.dateRange}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (feedChart) feedChart.destroy();
+                    
+                    const ctx = document.getElementById('feedChart').getContext('2d');
+                    feedChart = new Chart(ctx, {
+                        type: 'doughnut',
+                        data: {
+                            labels: data.map(d => d.feed_name),
+                            datasets: [{
+                                data: data.map(d => d.total_articles),
+                                backgroundColor: [
+                                    '#1976d2', '#388e3c', '#f57c00', '#d32f2f',
+                                    '#7b1fa2', '#0097a7', '#5d4037', '#616161',
+                                    '#e64a19', '#1565c0', '#2e7d32', '#f9a825'
+                                ]
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false,
+                            plugins: {
+                                legend: {
+                                    position: 'bottom',
+                                    onClick: function(e, legendItem, legend) {
+                                        const feedName = legend.chart.data.labels[legendItem.index];
+                                        showFeedDetails(feedName);
+                                    }
+                                }
                             }
                         }
-                    }
+                    });
                 });
-            });
+        }
 
-        // Analyze word trends
         function analyzeWord() {
             const word = document.getElementById('wordInput').value.trim();
             const days = document.getElementById('trendDays').value;
             
             if (!word) return;
 
-            fetch(`?ajax=word_trends&word=${encodeURIComponent(word)}&days=${days}`)
+            const url = `?ajax=word_trends&word=${encodeURIComponent(word)}&days=${days}` +
+                        (currentFilters.feed ? `&feed=${encodeURIComponent(currentFilters.feed)}` : '');
+
+            fetch(url)
                 .then(response => response.json())
                 .then(data => {
-                    if (trendChart) {
-                        trendChart.destroy();
-                    }
+                    if (trendChart) trendChart.destroy();
 
                     const ctx = document.getElementById('trendChart').getContext('2d');
                     trendChart = new Chart(ctx, {
@@ -391,33 +825,192 @@ function get_daily_stats($days = 30) {
                                 data: data.map(d => d.total_count),
                                 borderColor: '#f57c00',
                                 backgroundColor: 'rgba(245, 124, 0, 0.1)',
-                                tension: 0.1
+                                tension: 0.1,
+                                fill: true
                             }]
                         },
                         options: {
                             responsive: true,
                             maintainAspectRatio: false,
                             scales: {
-                                y: {
-                                    beginAtZero: true
-                                }
+                                y: { beginAtZero: true }
                             }
                         }
                     });
+
+                    loadRelatedWords(word, days);
                 });
         }
 
-        // Show word trend from trending words
-        function showWordTrend(word) {
-            document.getElementById('wordInput').value = word;
-            analyzeWord();
+        function loadRelatedWords(word, days) {
+            fetch(`?ajax=word_cooccurrence&word=${encodeURIComponent(word)}&days=${days}`)
+                .then(response => response.json())
+                .then(data => {
+                    const container = document.getElementById('relatedWordsList');
+                    const section = document.getElementById('relatedWords');
+                    
+                    if (data.length > 0) {
+                        section.style.display = 'block';
+                        container.innerHTML = data.map(item => 
+                            `<span class="related-tag" onclick="document.getElementById('wordInput').value='${item.word}'; analyzeWord();">
+                                ${item.word} (${item.cooccurrence_count})
+                            </span>`
+                        ).join('');
+                    } else {
+                        section.style.display = 'none';
+                    }
+                });
         }
 
-        // Auto-refresh data every 5 minutes
-        setInterval(() => {
-            location.reload();
-        }, 300000);
+        function showWordDetails(word) {
+            const modal = document.getElementById('wordModal');
+            const title = document.getElementById('modalWordTitle');
+            const content = document.getElementById('modalWordContent');
+            
+            title.textContent = `Word Analysis: "${word}"`;
+            content.innerHTML = '<div class="loading">Loading details...</div>';
+            modal.style.display = 'block';
+            
+            fetch(`?ajax=word_details&word=${encodeURIComponent(word)}&days=${currentFilters.dateRange}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        content.innerHTML = '<p>No data found for this word.</p>';
+                        return;
+                    }
+                    
+                    let html = '<div class="detail-section">';
+                    html += '<h4>Feed Distribution</h4>';
+                    
+                    data.forEach(feed => {
+                        html += `
+                            <div class="detail-item">
+                                <div>
+                                    <strong>${feed.feed_name}</strong><br>
+                                    <small>${feed.days_appeared} days active • Last seen: ${new Date(feed.last_seen).toLocaleDateString()}</small>
+                                </div>
+                                <div class="stat-value">${feed.total_mentions} mentions</div>
+                            </div>
+                        `;
+                    });
+                    
+                    html += '</div>';
+                    html += `<div class="controls" style="margin-top: 20px;">
+                        <button onclick="document.getElementById('wordInput').value='${word}'; analyzeWord(); closeModal('wordModal');" class="btn">
+                            View Trend Chart
+                        </button>
+                    </div>`;
+                    
+                    content.innerHTML = html;
+                });
+        }
+
+        function showFeedDetails(feedName) {
+            const modal = document.getElementById('feedModal');
+            const title = document.getElementById('modalFeedTitle');
+            const content = document.getElementById('modalFeedContent');
+            
+            title.textContent = `Feed Analysis: ${feedName}`;
+            content.innerHTML = '<div class="loading">Loading details...</div>';
+            modal.style.display = 'block';
+            
+            fetch(`?ajax=feed_words&feed=${encodeURIComponent(feedName)}&days=${currentFilters.dateRange}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        content.innerHTML = '<p>No data found for this feed.</p>';
+                        return;
+                    }
+                    
+                    let html = '<div class="detail-section">';
+                    html += '<h4>Top Words in This Feed</h4>';
+                    html += '<div class="trending-words">';
+                    
+                    data.forEach(item => {
+                        html += `
+                            <span class="word-tag" onclick="document.getElementById('wordInput').value='${item.word}'; analyzeWord(); closeModal('feedModal');">
+                                ${item.word} <span class="badge">${item.total_count}</span>
+                            </span>
+                        `;
+                    });
+                    
+                    html += '</div></div>';
+                    html += `<div class="controls" style="margin-top: 20px;">
+                        <button onclick="filterByFeed('${feedName}')" class="btn">
+                            Filter Dashboard by This Feed
+                        </button>
+                    </div>`;
+                    
+                    content.innerHTML = html;
+                });
+        }
+
+        function filterByFeed(feedName) {
+            document.getElementById('feedFilter').value = feedName;
+            applyFilters();
+            closeModal('feedModal');
+        }
+
+        function searchArticles() {
+            const keyword = document.getElementById('searchInput').value.trim();
+            const resultsContainer = document.getElementById('searchResults');
+            
+            if (!keyword) {
+                resultsContainer.innerHTML = '<p>Please enter a search term.</p>';
+                return;
+            }
+            
+            resultsContainer.innerHTML = '<div class="loading">Searching...</div>';
+            
+            const url = `?ajax=search_articles&keyword=${encodeURIComponent(keyword)}` +
+                        (currentFilters.feed ? `&feed=${encodeURIComponent(currentFilters.feed)}` : '');
+            
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.length === 0) {
+                        resultsContainer.innerHTML = '<p>No results found.</p>';
+                        return;
+                    }
+                    
+                    let html = `<p><strong>${data.length} results found</strong></p>`;
+                    
+                    data.forEach(item => {
+                        html += `
+                            <div class="search-item">
+                                <strong>${item.feed_name}</strong><br>
+                                <small>${item.total_articles} articles • ${new Date(item.timestamp).toLocaleString()}</small>
+                            </div>
+                        `;
+                    });
+                    
+                    resultsContainer.innerHTML = html;
+                });
+        }
+
+        function compareWords() {
+            alert('Compare feature coming soon! You can manually analyze multiple words by searching them one at a time.');
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', function() {
+            document.getElementById('wordInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') analyzeWord();
+            });
+            
+            document.getElementById('searchInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') searchArticles();
+            });
+        });
     </script>
 </body>
 </html>
-            
