@@ -639,8 +639,8 @@ function get_time_filter($days) {
                 <div class="controls">
                     <input type="text" id="wordInput" class="word-input" placeholder="Enter word to analyze">
                     <button onclick="analyzeWord()" class="btn">Analyze</button>
-                    <button onclick="compareWords()" class="btn btn-secondary">Compare</button>
-                    <select id="trendDays" onchange="analyzeWord()">
+                    <button onclick="compareWords()" class="btn btn-secondary">Add to Compare</button>
+                    <select id="trendDays" onchange="comparedWords.length > 0 ? updateComparisonChart() : analyzeWord()">
                         <option value="1">24 hours</option>
                         <option value="2">48 hours</option>
                         <option value="7">7 days</option>
@@ -649,6 +649,7 @@ function get_time_filter($days) {
                         <option value="90">90 days</option>
                     </select>
                 </div>
+                <div id="comparisonControls" style="display: none;"></div>
                 <div class="chart-container" style="height: 400px;">
                     <canvas id="trendChart"></canvas>
                 </div>
@@ -743,10 +744,23 @@ function get_time_filter($days) {
             feed: null,
             dateRange: '30'
         };
+        let comparedWords = [];
+        const colors = [
+            '#f57c00', '#1976d2', '#388e3c', '#d32f2f', 
+            '#7b1fa2', '#0097a7', '#e91e63', '#00bcd4'
+        ];
 
         document.addEventListener('DOMContentLoaded', function() {
             loadDailyChart();
             loadFeedChart();
+            
+            document.getElementById('wordInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') analyzeWord();
+            });
+            
+            document.getElementById('searchInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') searchArticles();
+            });
         });
 
         function applyFilters() {
@@ -872,6 +886,11 @@ function get_time_filter($days) {
             const days = document.getElementById('trendDays').value;
             
             if (!word) return;
+            
+            // Clear comparison mode when analyzing single word
+            if (comparedWords.length > 0) {
+                clearComparison();
+            }
 
             const url = `?ajax=word_trends&word=${encodeURIComponent(word)}&days=${days}` +
                         (currentFilters.feed ? `&feed=${encodeURIComponent(currentFilters.feed)}` : '');
@@ -917,6 +936,150 @@ function get_time_filter($days) {
 
                     loadRelatedWords(word, days);
                 });
+        }
+
+        function compareWords() {
+            const word = document.getElementById('wordInput').value.trim();
+            
+            if (!word) {
+                alert('Please enter a word to compare');
+                return;
+            }
+            
+            // Check if word already in comparison
+            if (comparedWords.some(w => w.toLowerCase() === word.toLowerCase())) {
+                alert('This word is already in the comparison');
+                return;
+            }
+            
+            // Limit to 5 words for readability
+            if (comparedWords.length >= 5) {
+                alert('Maximum 5 words can be compared at once. Remove a word first.');
+                return;
+            }
+            
+            comparedWords.push(word);
+            updateComparisonChart();
+            updateComparisonControls();
+        }
+
+        function updateComparisonChart() {
+            const days = document.getElementById('trendDays').value;
+            
+            if (comparedWords.length === 0) {
+                if (trendChart) trendChart.destroy();
+                return;
+            }
+            
+            // Fetch data for all words
+            Promise.all(
+                comparedWords.map(word => {
+                    const url = `?ajax=word_trends&word=${encodeURIComponent(word)}&days=${days}` +
+                                (currentFilters.feed ? `&feed=${encodeURIComponent(currentFilters.feed)}` : '');
+                    return fetch(url).then(r => r.json());
+                })
+            ).then(results => {
+                if (trendChart) trendChart.destroy();
+                
+                const ctx = document.getElementById('trendChart').getContext('2d');
+                
+                // Get all unique dates from all datasets
+                const allDates = new Set();
+                results.forEach(data => {
+                    data.forEach(d => allDates.add(d.date));
+                });
+                const sortedDates = Array.from(allDates).sort();
+                
+                // Format labels based on time range
+                let labels = sortedDates.map(date => {
+                    if (days === '1' || days === '2') {
+                        const d = new Date(date);
+                        return d.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric' });
+                    } else {
+                        return date;
+                    }
+                });
+                
+                // Create datasets for each word
+                const datasets = comparedWords.map((word, index) => {
+                    const wordData = results[index];
+                    const dataMap = new Map(wordData.map(d => [d.date, d.total_count]));
+                    
+                    return {
+                        label: `"${word}" mentions`,
+                        data: sortedDates.map(date => dataMap.get(date) || 0),
+                        borderColor: colors[index % colors.length],
+                        backgroundColor: colors[index % colors.length] + '20',
+                        tension: 0.1,
+                        fill: false
+                    };
+                });
+                
+                trendChart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: labels,
+                        datasets: datasets
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { beginAtZero: true }
+                        },
+                        plugins: {
+                            legend: { 
+                                display: true,
+                                position: 'top'
+                            }
+                        }
+                    }
+                });
+                
+                // Hide related words section during comparison
+                document.getElementById('relatedWords').style.display = 'none';
+            });
+        }
+
+        function updateComparisonControls() {
+            const container = document.getElementById('comparisonControls');
+            
+            if (comparedWords.length === 0) {
+                container.style.display = 'none';
+                return;
+            }
+            
+            container.style.display = 'block';
+            
+            let html = '<div style="margin: 10px 0;"><strong>Comparing:</strong></div>';
+            html += '<div class="trending-words">';
+            
+            comparedWords.forEach((word, index) => {
+                html += `
+                    <span class="word-tag" style="background: ${colors[index % colors.length]}; color: white;">
+                        ${word} 
+                        <span onclick="removeFromComparison('${word}')" style="cursor: pointer; margin-left: 5px; font-weight: bold;">✕</span>
+                    </span>
+                `;
+            });
+            
+            html += '</div>';
+            html += '<button onclick="clearComparison()" class="btn btn-secondary" style="margin-top: 10px;">Clear All</button>';
+            
+            container.innerHTML = html;
+        }
+
+        function removeFromComparison(word) {
+            comparedWords = comparedWords.filter(w => w !== word);
+            updateComparisonChart();
+            updateComparisonControls();
+        }
+
+        function clearComparison() {
+            comparedWords = [];
+            updateComparisonChart();
+            updateComparisonControls();
+            document.getElementById('wordInput').value = '';
         }
 
         function loadRelatedWords(word, days) {
@@ -1065,10 +1228,6 @@ function get_time_filter($days) {
                 });
         }
 
-        function compareWords() {
-            alert('Compare feature coming soon! You can manually analyze multiple words by searching them one at a time.');
-        }
-
         function closeModal(modalId) {
             document.getElementById(modalId).style.display = 'none';
         }
@@ -1078,17 +1237,6 @@ function get_time_filter($days) {
                 event.target.style.display = 'none';
             }
         }
-
-        document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('wordInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') analyzeWord();
-            });
-            
-            document.getElementById('searchInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') searchArticles();
-            });
-        });
     </script>
 </body>
 </html>
-                
