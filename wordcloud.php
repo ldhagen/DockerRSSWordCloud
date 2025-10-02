@@ -261,7 +261,6 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'word_details') {
             <button onclick="updateWordCloud()" class="btn">Update Cloud</button>
             <button onclick="toggleAnimation()" class="btn" id="animationBtn">Pause Animation</button>
             <button onclick="exportAsImage()" class="btn btn-success">📷 Export as PNG</button>
-            <button onclick="exportAsVideo()" class="btn btn-success" id="exportBtn">🎬 Export as Video</button>
             <button onclick="exportAsGif()" class="btn btn-warning" id="exportGifBtn">🎞️ Export as GIF</button>
         </div>
 

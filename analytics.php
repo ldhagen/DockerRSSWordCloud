@@ -8,37 +8,37 @@ if (isset($_GET['ajax'])) {
     switch ($_GET['ajax']) {
         case 'word_trends':
             $word = $_GET['word'] ?? '';
-            $days = (int)($_GET['days'] ?? 30);
+            $days = $_GET['days'] ?? '30';
             $feed = $_GET['feed'] ?? null;
             echo json_encode(get_word_trends($word, $days, $feed));
             break;
             
         case 'feed_activity':
-            $days = (int)($_GET['days'] ?? 30);
+            $days = $_GET['days'] ?? '30';
             echo json_encode(get_feed_activity($days));
             break;
             
         case 'daily_stats':
-            $days = (int)($_GET['days'] ?? 30);
+            $days = $_GET['days'] ?? '30';
             $feed = $_GET['feed'] ?? null;
             echo json_encode(get_daily_stats($days, $feed));
             break;
             
         case 'word_details':
             $word = $_GET['word'] ?? '';
-            $days = (int)($_GET['days'] ?? 30);
+            $days = $_GET['days'] ?? '30';
             echo json_encode(get_word_details($word, $days));
             break;
             
         case 'feed_words':
             $feed = $_GET['feed'] ?? '';
-            $days = (int)($_GET['days'] ?? 30);
+            $days = $_GET['days'] ?? '30';
             echo json_encode(get_feed_specific_words($feed, $days));
             break;
             
         case 'word_cooccurrence':
             $word = $_GET['word'] ?? '';
-            $days = (int)($_GET['days'] ?? 30);
+            $days = $_GET['days'] ?? '30';
             echo json_encode(get_word_cooccurrence($word, $days));
             break;
             
@@ -78,11 +78,12 @@ function get_recent_collections($limit = 10) {
     }
 }
 
-function get_feed_activity($days = 30) {
+function get_feed_activity($days = '30') {
     $pdo = get_db();
     if (!$pdo) return [];
     
     try {
+        $timeFilter = get_time_filter($days);
         $stmt = $pdo->prepare("
             SELECT 
                 feed_name,
@@ -92,49 +93,84 @@ function get_feed_activity($days = 30) {
                 AVG(total_articles) as avg_articles,
                 MAX(timestamp) as last_collection
             FROM collections 
-            WHERE timestamp > datetime('now', '-' || ? || ' days')
+            WHERE timestamp > $timeFilter
             GROUP BY feed_name
             ORDER BY collection_count DESC
         ");
-        $stmt->execute([$days]);
+        $stmt->execute();
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         return [];
     }
 }
 
-function get_daily_stats($days = 30, $feed = null) {
+function get_daily_stats($days = '30', $feed = null) {
     $pdo = get_db();
     if (!$pdo) return [];
     
     try {
-        if ($feed) {
-            $stmt = $pdo->prepare("
-                SELECT 
-                    DATE(timestamp) as date,
-                    COUNT(*) as collections,
-                    SUM(total_articles) as articles,
-                    SUM(total_words) as words
-                FROM collections 
-                WHERE timestamp > datetime('now', '-' || ? || ' days')
-                AND feed_name = ?
-                GROUP BY DATE(timestamp)
-                ORDER BY date
-            ");
-            $stmt->execute([$days, $feed]);
+        $timeFilter = get_time_filter($days);
+        
+        // For hourly granularity with 24h and 48h periods
+        if ($days === '1' || $days === '2') {
+            if ($feed) {
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        strftime('%Y-%m-%d %H:00:00', timestamp) as date,
+                        COUNT(*) as collections,
+                        SUM(total_articles) as articles,
+                        SUM(total_words) as words
+                    FROM collections 
+                    WHERE timestamp > $timeFilter
+                    AND feed_name = ?
+                    GROUP BY strftime('%Y-%m-%d %H:00:00', timestamp)
+                    ORDER BY date
+                ");
+                $stmt->execute([$feed]);
+            } else {
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        strftime('%Y-%m-%d %H:00:00', timestamp) as date,
+                        COUNT(*) as collections,
+                        SUM(total_articles) as articles,
+                        SUM(total_words) as words
+                    FROM collections 
+                    WHERE timestamp > $timeFilter
+                    GROUP BY strftime('%Y-%m-%d %H:00:00', timestamp)
+                    ORDER BY date
+                ");
+                $stmt->execute();
+            }
         } else {
-            $stmt = $pdo->prepare("
-                SELECT 
-                    DATE(timestamp) as date,
-                    COUNT(*) as collections,
-                    SUM(total_articles) as articles,
-                    SUM(total_words) as words
-                FROM collections 
-                WHERE timestamp > datetime('now', '-' || ? || ' days')
-                GROUP BY DATE(timestamp)
-                ORDER BY date
-            ");
-            $stmt->execute([$days]);
+            // Daily granularity for longer periods
+            if ($feed) {
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        DATE(timestamp) as date,
+                        COUNT(*) as collections,
+                        SUM(total_articles) as articles,
+                        SUM(total_words) as words
+                    FROM collections 
+                    WHERE timestamp > $timeFilter
+                    AND feed_name = ?
+                    GROUP BY DATE(timestamp)
+                    ORDER BY date
+                ");
+                $stmt->execute([$feed]);
+            } else {
+                $stmt = $pdo->prepare("
+                    SELECT 
+                        DATE(timestamp) as date,
+                        COUNT(*) as collections,
+                        SUM(total_articles) as articles,
+                        SUM(total_words) as words
+                    FROM collections 
+                    WHERE timestamp > $timeFilter
+                    GROUP BY DATE(timestamp)
+                    ORDER BY date
+                ");
+                $stmt->execute();
+            }
         }
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
@@ -142,11 +178,12 @@ function get_daily_stats($days = 30, $feed = null) {
     }
 }
 
-function get_word_details($word, $days = 30) {
+function get_word_details($word, $days = '30') {
     $pdo = get_db();
     if (!$pdo) return [];
     
     try {
+        $timeFilter = get_time_filter($days);
         $stmt = $pdo->prepare("
             SELECT 
                 feed_name,
@@ -155,11 +192,11 @@ function get_word_details($word, $days = 30) {
                 MAX(timestamp) as last_seen
             FROM word_history
             WHERE LOWER(word) = LOWER(?)
-            AND timestamp > datetime('now', '-' || ? || ' days')
+            AND timestamp > $timeFilter
             GROUP BY feed_name
             ORDER BY total_mentions DESC
         ");
-        $stmt->execute([$word, $days]);
+        $stmt->execute([$word]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log("Error in get_word_details: " . $e->getMessage());
@@ -167,11 +204,12 @@ function get_word_details($word, $days = 30) {
     }
 }
 
-function get_feed_specific_words($feed, $days = 30, $limit = 30) {
+function get_feed_specific_words($feed, $days = '30', $limit = 30) {
     $pdo = get_db();
     if (!$pdo) return [];
     
     try {
+        $timeFilter = get_time_filter($days);
         $stmt = $pdo->prepare("
             SELECT 
                 word,
@@ -179,12 +217,12 @@ function get_feed_specific_words($feed, $days = 30, $limit = 30) {
                 COUNT(DISTINCT DATE(timestamp)) as days_appeared
             FROM word_history
             WHERE feed_name = ?
-            AND timestamp > datetime('now', '-' || ? || ' days')
+            AND timestamp > $timeFilter
             GROUP BY word
             ORDER BY total_count DESC
             LIMIT ?
         ");
-        $stmt->execute([$feed, $days, $limit]);
+        $stmt->execute([$feed, $limit]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log("Error in get_feed_specific_words: " . $e->getMessage());
@@ -192,11 +230,12 @@ function get_feed_specific_words($feed, $days = 30, $limit = 30) {
     }
 }
 
-function get_word_cooccurrence($word, $days = 30, $limit = 20) {
+function get_word_cooccurrence($word, $days = '30', $limit = 20) {
     $pdo = get_db();
     if (!$pdo) return [];
     
     try {
+        $timeFilter = get_time_filter($days);
         $stmt = $pdo->prepare("
             SELECT 
                 w2.word,
@@ -206,12 +245,12 @@ function get_word_cooccurrence($word, $days = 30, $limit = 20) {
             JOIN word_history w2 ON w1.collection_id = w2.collection_id
             WHERE LOWER(w1.word) = LOWER(?)
             AND LOWER(w2.word) != LOWER(?)
-            AND w1.timestamp > datetime('now', '-' || ? || ' days')
+            AND w1.timestamp > $timeFilter
             GROUP BY w2.word
             ORDER BY cooccurrence_count DESC, total_mentions DESC
             LIMIT ?
         ");
-        $stmt->execute([$word, $word, $days, $limit]);
+        $stmt->execute([$word, $word, $limit]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log("Error in get_word_cooccurrence: " . $e->getMessage());
@@ -278,6 +317,17 @@ function get_feed_list() {
         return $stmt->fetchAll(PDO::FETCH_COLUMN);
     } catch (PDOException $e) {
         return [];
+    }
+}
+
+function get_time_filter($days) {
+    switch ($days) {
+        case '1':
+            return "datetime('now', '-24 hours')";
+        case '2':
+            return "datetime('now', '-48 hours')";
+        default:
+            return "datetime('now', '-' || " . intval($days) . " || ' days')";
     }
 }
 ?>
@@ -537,6 +587,8 @@ function get_feed_list() {
                 <?php endforeach; ?>
             </select>
             <select id="dateRangeFilter" onchange="applyFilters()">
+                <option value="1">Last 24 hours</option>
+                <option value="2">Last 48 hours</option>
                 <option value="7">Last 7 days</option>
                 <option value="14">Last 14 days</option>
                 <option value="30" selected>Last 30 days</option>
@@ -589,6 +641,8 @@ function get_feed_list() {
                     <button onclick="analyzeWord()" class="btn">Analyze</button>
                     <button onclick="compareWords()" class="btn btn-secondary">Compare</button>
                     <select id="trendDays" onchange="analyzeWord()">
+                        <option value="1">24 hours</option>
+                        <option value="2">48 hours</option>
                         <option value="7">7 days</option>
                         <option value="14">14 days</option>
                         <option value="30" selected>30 days</option>
@@ -619,7 +673,7 @@ function get_feed_list() {
                 <h3>Feed Statistics</h3>
                 <div id="feedStats">
                     <?php
-                    $feed_activity = get_feed_activity(30);
+                    $feed_activity = get_feed_activity('30');
                     if (empty($feed_activity)):
                     ?>
                         <p>No feed activity yet. <a href="index.php">Process some feeds</a> to see statistics!</p>
@@ -687,7 +741,7 @@ function get_feed_list() {
         let trendChart = null;
         let currentFilters = {
             feed: null,
-            dateRange: 30
+            dateRange: '30'
         };
 
         document.addEventListener('DOMContentLoaded', function() {
@@ -697,7 +751,7 @@ function get_feed_list() {
 
         function applyFilters() {
             currentFilters.feed = document.getElementById('feedFilter').value || null;
-            currentFilters.dateRange = parseInt(document.getElementById('dateRangeFilter').value);
+            currentFilters.dateRange = document.getElementById('dateRangeFilter').value;
             
             updateActiveFilters();
             loadDailyChart();
@@ -707,7 +761,7 @@ function get_feed_list() {
         function clearFilters() {
             document.getElementById('feedFilter').value = '';
             document.getElementById('dateRangeFilter').value = '30';
-            currentFilters = { feed: null, dateRange: 30 };
+            currentFilters = { feed: null, dateRange: '30' };
             updateActiveFilters();
             loadDailyChart();
             loadFeedChart();
@@ -737,10 +791,22 @@ function get_feed_list() {
                     if (dailyChart) dailyChart.destroy();
                     
                     const ctx = document.getElementById('dailyChart').getContext('2d');
+                    
+                    // Format labels based on time range
+                    let labels = data.map(d => {
+                        if (currentFilters.dateRange === '1' || currentFilters.dateRange === '2') {
+                            // Show hour for 24h/48h views
+                            const date = new Date(d.date);
+                            return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric' });
+                        } else {
+                            return d.date;
+                        }
+                    });
+                    
                     dailyChart = new Chart(ctx, {
                         type: 'line',
                         data: {
-                            labels: data.map(d => d.date),
+                            labels: labels,
                             datasets: [{
                                 label: 'Articles Collected',
                                 data: data.map(d => d.articles),
@@ -816,10 +882,21 @@ function get_feed_list() {
                     if (trendChart) trendChart.destroy();
 
                     const ctx = document.getElementById('trendChart').getContext('2d');
+                    
+                    // Format labels based on time range
+                    let labels = data.map(d => {
+                        if (days === '1' || days === '2') {
+                            const date = new Date(d.date);
+                            return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric' });
+                        } else {
+                            return d.date;
+                        }
+                    });
+                    
                     trendChart = new Chart(ctx, {
                         type: 'line',
                         data: {
-                            labels: data.map(d => d.date),
+                            labels: labels,
                             datasets: [{
                                 label: `"${word}" mentions`,
                                 data: data.map(d => d.total_count),
@@ -1014,3 +1091,4 @@ function get_feed_list() {
     </script>
 </body>
 </html>
+                
