@@ -408,13 +408,23 @@ If you encounter errors like "attempt to write a readonly database" or "no such 
 
 ### Permission Errors
 
+If you encounter "Permission denied" or "readonly database" errors when adding feeds or processing data, it is typically due to UID/GID mismatches between the host and the Docker container (especially on Linux).
+
+The most reliable fix is to make the data, logs, and cache directories world-writable:
+
 ```bash
 chmod -R 777 data logs cache
-# Or for Docker:
+```
+
+Alternatively, if using Docker Compose:
+
+```bash
 docker-compose down
 sudo chmod -R 777 data logs cache
 docker-compose up -d
 ```
+
+This ensures the `www-data` user (UID 33) inside the container can write to these host-mounted volumes.
 
 ### Database Migration
 

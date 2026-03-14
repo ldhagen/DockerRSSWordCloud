@@ -65,7 +65,7 @@ function analyze_trending_words($days = 7, $limit = 50) {
                 w1.word,
                 SUM(w1.count) as current_week,
                 COALESCE(w2.prev_week, 0) as prev_week,
-                ROUND((SUM(w1.count) - COALESCE(w2.prev_week, 0)) * 100.0 / GREATEST(COALESCE(w2.prev_week, 1), 1), 2) as change_percent,
+                ROUND((SUM(w1.count) - COALESCE(w2.prev_week, 0)) * 100.0 / (CASE WHEN COALESCE(w2.prev_week, 1) > 1 THEN COALESCE(w2.prev_week, 1) ELSE 1 END), 2) as change_percent,
                 COUNT(DISTINCT w1.feed_name) as feed_count
             FROM word_history w1
             LEFT JOIN (
