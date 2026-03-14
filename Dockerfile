@@ -46,7 +46,7 @@ COPY cron-rss-collector /etc/cron.d/rss-collector
 RUN chmod 0644 /etc/cron.d/rss-collector
 
 # Create startup script to run both cron and Apache
-RUN printf '#!/bin/bash\nservice cron start\napache2-foreground\n' > /usr/local/bin/start-services.sh \
+RUN printf '#!/bin/bash\nchown -R www-data:www-data /var/www/html/data /var/www/html/logs /var/www/html/cache /var/www/html/scripts\nservice cron start\napache2-foreground\n' > /usr/local/bin/start-services.sh \
     && chmod +x /usr/local/bin/start-services.sh
 
 # Expose port

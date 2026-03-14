@@ -1,0 +1,8 @@
+# Ignore generated files and directories
+/cache/
+/data/
+/logs/
+
+# Ignore specific files
+*.log
+*.bak.*

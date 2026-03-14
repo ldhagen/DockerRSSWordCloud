@@ -334,6 +334,61 @@ Word frequencies are inserted in batch transactions for better performance.
 
 ## Troubleshooting
 
+### Word Frequency Inflation (Duplicates)
+
+If you find that certain words have unusually high frequencies (e.g., in the thousands for common headlines), it is likely due to duplicate processing of the same articles over time.
+
+As of **v3.3**, the system includes built-in duplicate detection that only processes and counts words for **newly discovered articles** (based on their unique URL).
+
+#### **Fixing Existing Inflated Data:**
+If your database already contains inflated historical data, you can run the rebuild utility inside your Docker container:
+
+```bash
+docker exec rss-word-counter php /var/www/html/scripts/rebuild_analytics.php
+```
+
+This script will:
+1. Identify unique articles by their link.
+2. Clear the redundant historical "collections" and word counts.
+3. Re-calculate accurate word frequencies and reconstruct your trend history based only on unique content.
+
+### Database Writing Issues (Readonly database, GREATEST function error)
+
+If you encounter errors like "attempt to write a readonly database" or "no such function: GREATEST", follow these steps:
+
+1.  **Clean Rebuild (Docker):**
+    ```bash
+    docker-compose down --volumes --remove-orphans
+    docker-compose build --no-cache
+    docker-compose up -d
+    ```
+    This ensures that Docker recreates volumes with correct permissions and rebuilds the image with the latest fixes.
+
+2.  **Verify Permissions (Docker):**
+    After starting the container, verify that the `data` directory and `analytics.db` are owned by `www-data`:
+    ```bash
+    docker exec rss-word-counter ls -l /var/www/html/data
+    ```
+    You should see `www-data` as the owner. If not, there might be an issue with your Docker setup or host permissions for the mounted `./data` directory.
+
+3.  **Manually Trigger Collection & Analysis:**
+    Execute the collection and analysis scripts manually inside the container to ensure they run without errors:
+    ```bash
+    docker exec rss-word-counter php /var/www/html/scripts/auto_collect.php
+    docker exec rss-word-counter php /var/www/html/scripts/daily_analysis.php
+    ```
+
+4.  **Check Logs:**
+    Inspect the `logs/analyzer.log` file for recent entries, ensuring there are no `[ERROR] Failed to store data for ...` or `SQLSTATE[HY000]: General error: 1 no such function: GREATEST` messages. You should see `Stored X words for collection Y` and `Daily analysis saved to: ...`.
+
+5.  **Verify Data in Database:**
+    Connect to the database inside the container and check the row count:
+    ```bash
+    docker exec rss-word-counter sqlite3 /var/www/html/data/analytics.db "SELECT COUNT(*) FROM collections;"
+    docker exec rss-word-counter sqlite3 /var/www/html/data/analytics.db "SELECT COUNT(*) FROM word_history;"
+    ```
+    The counts should increase after running `auto_collect.php`.
+
 ### No Data Showing in Analytics
 
 1. Check that feeds have been processed: Look for "Stored in database (ID: X)" messages
@@ -565,6 +620,8 @@ For issues or questions:
 
 ## Version History
 
+- **v3.3** - Implemented duplicate article detection via unique URL filtering to prevent inflated word frequencies and provided `rebuild_analytics.php` utility.
+- **v3.2** - Fixed database writing issues, including "readonly database" errors and SQL `GREATEST` function incompatibility with SQLite.
 - **v3.1** - Added 24h/48h time filters with hourly granularity and multi-word comparison feature
 - **v3.0** - Added comprehensive analytics dashboard with interactive features
 - **v2.0** - Integrated SQLite database for historical tracking

@@ -104,35 +104,53 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $rss_content = fetch_rss($feed['url'], $use_cache);
                 
                 if ($rss_content) {
-                    $content = parse_rss_content($rss_content, TITLES_ONLY_ANALYSIS);
-                    $all_content .= ' ' . $content;
+                    // Extract all articles from the feed
+                    $all_articles = extract_articles($rss_content, $feed['name']);
                     
-                    // Store articles for this feed
-                    $feed_articles = extract_articles($rss_content, $feed['name']);
-                    $articles = array_merge($articles, $feed_articles);
+                    // Filter to only new articles
+                    $new_articles = filter_new_articles($all_articles, $feed['name']);
+                    
+                    if (!empty($new_articles)) {
+                        // Generate content from new articles only
+                        $content = get_content_from_articles($new_articles, TITLES_ONLY_ANALYSIS);
+                        $all_content .= ' ' . $content;
+                        
+                        // Store articles for this feed
+                        $articles = array_merge($articles, $new_articles);
 
-                    $feed_word_counts = count_words($content, $stopwords);
+                        $feed_word_counts = count_words($content, $stopwords);
 
-                    // CRITICAL FIX: ALWAYS store individual feed data in database for analytics
-                    $collection_id = store_collection_data($feed['name'], $feed_articles, $feed_word_counts);
+                        // Store only new feed data in database
+                        $collection_id = store_collection_data($feed['name'], $new_articles, $feed_word_counts);
 
-                    if ($feed_specific) {
-                        // Show individual feed counts in UI
-                        $word_counts[$feed['name']] = array_slice($feed_word_counts, 0, $limit);
+                        if ($feed_specific) {
+                            // Show NEW feed counts in UI
+                            $word_counts[$feed['name']] = array_slice($feed_word_counts, 0, $limit);
+                        }
+                        
+                        $processing_time = round(microtime(true) - $start_time, 2);
+                        $processing_log[] = [
+                            'feed' => $feed['name'],
+                            'articles' => count($new_articles),
+                            'words' => array_sum($feed_word_counts),
+                            'unique_words' => count($feed_word_counts),
+                            'time' => $processing_time,
+                            'status' => 'success',
+                            'collection_id' => $collection_id
+                        ]; 
+                        
+                        log_message("Processed feed: {$feed['name']} - " . count($new_articles) . " NEW articles, " . count($feed_word_counts) . " unique words in {$processing_time}s (Collection ID: $collection_id)");
+                    } else {
+                        $processing_log[] = [
+                            'feed' => $feed['name'],
+                            'articles' => 0,
+                            'words' => 0,
+                            'unique_words' => 0,
+                            'time' => 0,
+                            'status' => 'no_new_content'
+                        ];
+                        log_message("No NEW articles for feed: {$feed['name']}");
                     }
-                    
-                    $processing_time = round(microtime(true) - $start_time, 2);
-                    $processing_log[] = [
-                        'feed' => $feed['name'],
-                        'articles' => count($feed_articles),
-                        'words' => array_sum($feed_word_counts),
-                        'unique_words' => count($feed_word_counts),
-                        'time' => $processing_time,
-                        'status' => 'success',
-                        'collection_id' => $collection_id
-                    ]; 
-                    
-                    log_message("Processed feed: {$feed['name']} - " . count($feed_articles) . " articles, " . count($feed_word_counts) . " unique words in {$processing_time}s (Collection ID: $collection_id)");
                 } else {
                     $processing_log[] = [
                         'feed' => $feed['name'],

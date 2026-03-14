@@ -74,33 +74,36 @@ foreach ($feeds_to_process as $index => $feed) {
         $rss_content = fetch_rss($feed['url']);
         
         if ($rss_content) {
-            // Parse content (titles only based on TITLES_ONLY_ANALYSIS setting)
-            $content = parse_rss_content($rss_content, TITLES_ONLY_ANALYSIS);
+            // Extract all articles from the feed
+            $all_articles = extract_articles($rss_content, $feed['name']);
             
-            // Extract articles
-            $articles = extract_articles($rss_content, $feed['name']);
+            // Filter to only new articles
+            $new_articles = filter_new_articles($all_articles, $feed['name']);
             
-            // Count words
-            $word_counts = count_words($content, $stopwords);
-            
-            if (!empty($word_counts) || !empty($articles)) {
+            if (!empty($new_articles)) {
+                // Generate content from new articles only
+                $content = get_content_from_articles($new_articles, TITLES_ONLY_ANALYSIS);
+                
+                // Count words from new articles
+                $word_counts = count_words($content, $stopwords);
+                
                 // Store collection data
-                $collection_id = store_collection_data($feed['name'], $articles, $word_counts);
+                $collection_id = store_collection_data($feed['name'], $new_articles, $word_counts);
                 
                 if ($collection_id) {
                     $successful_collections++;
-                    $total_articles += count($articles);
+                    $total_articles += count($new_articles);
                     $total_words += array_sum($word_counts);
                     
                     $processing_time = round(microtime(true) - $feed_start_time, 2);
-                    log_message("Successfully processed {$feed['name']}: " . count($articles) . " articles, " . array_sum($word_counts) . " words in {$processing_time}s", 'INFO');
+                    log_message("Successfully processed {$feed['name']}: " . count($new_articles) . " NEW articles, " . array_sum($word_counts) . " words in {$processing_time}s", 'INFO');
                 } else {
                     log_message("Failed to store data for {$feed['name']}", 'ERROR');
                     $failed_collections++;
                 }
             } else {
-                log_message("No content extracted from {$feed['name']}", 'WARNING');
-                $failed_collections++;
+                log_message("No NEW articles found in {$feed['name']} - skipping storage", 'INFO');
+                $successful_collections++; // Considered a success as we checked it
             }
         } else {
             log_message("Failed to fetch RSS content from {$feed['name']}", 'ERROR');

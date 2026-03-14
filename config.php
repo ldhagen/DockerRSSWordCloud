@@ -270,25 +270,28 @@ function extract_articles($rss_content, $feed_name) {
             
             // Extract title
             if (preg_match('/<title>(.*?)<\/title>/is', $item, $title_match)) {
-                $article['title'] = strip_tags($title_match[1]);
+                $article['title'] = trim(strip_tags($title_match[1]));
             }
             
             // Extract link
             if (preg_match('/<link>(.*?)<\/link>/is', $item, $link_match)) {
-                $article['link'] = strip_tags($link_match[1]);
+                $article['link'] = trim(strip_tags($link_match[1]));
             }
             
             // Extract description
             if (preg_match('/<description>(.*?)<\/description>/is', $item, $desc_match)) {
-                $article['description'] = strip_tags($desc_match[1]);
+                $article['description'] = trim(strip_tags($desc_match[1]));
             }
             
             // Extract publication date
             if (preg_match('/<pubDate>(.*?)<\/pubDate>/is', $item, $date_match)) {
-                $article['pub_date'] = strip_tags($date_match[1]);
+                $article['pub_date'] = trim(strip_tags($date_match[1]));
             }
             
-            $articles[] = $article;
+            // Only add if it has a title
+            if (!empty($article['title'])) {
+                $articles[] = $article;
+            }
         }
     } else {
         // Try Atom format
@@ -304,30 +307,70 @@ function extract_articles($rss_content, $feed_name) {
                 
                 // Extract title
                 if (preg_match('/<title>(.*?)<\/title>/is', $entry, $title_match)) {
-                    $article['title'] = strip_tags($title_match[1]);
+                    $article['title'] = trim(strip_tags($title_match[1]));
                 }
                 
                 // Extract link
                 if (preg_match('/<link.*?href="(.*?)".*?>/is', $entry, $link_match)) {
-                    $article['link'] = $link_match[1];
+                    $article['link'] = trim($link_match[1]);
                 }
                 
                 // Extract summary
                 if (preg_match('/<summary>(.*?)<\/summary>/is', $entry, $summary_match)) {
-                    $article['description'] = strip_tags($summary_match[1]);
+                    $article['description'] = trim(strip_tags($summary_match[1]));
                 }
                 
                 // Extract published date
                 if (preg_match('/<published>(.*?)<\/published>/is', $entry, $date_match)) {
-                    $article['pub_date'] = strip_tags($date_match[1]);
+                    $article['pub_date'] = trim(strip_tags($date_match[1]));
                 }
                 
-                $articles[] = $article;
+                // Only add if it has a title
+                if (!empty($article['title'])) {
+                    $articles[] = $article;
+                }
             }
         }
     }
     
     return $articles;
+}
+
+/**
+ * Filters a list of articles to only those not already in the database
+ * for this specific feed.
+ */
+function filter_new_articles($articles, $feed_name) {
+    $pdo = get_db();
+    if (!$pdo || empty($articles)) return $articles;
+    
+    $new_articles = [];
+    
+    // Prepare statement once for performance
+    $stmt = $pdo->prepare("SELECT COUNT(*) FROM articles WHERE link = ? AND feed_name = ?");
+    
+    foreach ($articles as $article) {
+        $stmt->execute([$article['link'], $feed_name]);
+        if ($stmt->fetchColumn() == 0) {
+            $new_articles[] = $article;
+        }
+    }
+    
+    return $new_articles;
+}
+
+/**
+ * Generates text content for word counting from an array of articles
+ */
+function get_content_from_articles($articles, $titles_only = true) {
+    $content = '';
+    foreach ($articles as $article) {
+        $content .= ' ' . $article['title'];
+        if (!$titles_only && !empty($article['description'])) {
+            $content .= ' ' . $article['description'];
+        }
+    }
+    return $content;
 }
 
 // Enhanced word counting
