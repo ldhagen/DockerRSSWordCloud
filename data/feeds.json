@@ -13,10 +13,6 @@
             "name": "The Guardian - World News"
         },
         {
-            "url": "https:\/\/www.reuters.com\/feed\/",
-            "name": "Reuters News"
-        },
-        {
             "url": "https:\/\/feeds.washingtonpost.com\/rss\/business\/technology?itid=lk_inline_manual_25",
             "name": "WaPo Tech"
         },
@@ -37,10 +33,6 @@
             "name": "CNBC Top News"
         },
         {
-            "url": "https:\/\/search.cnbc.com\/rs\/search\/combinedcms\/view.xml?partnerId=wrss01&id=15839263",
-            "name": "CNBC Top Video"
-        },
-        {
             "url": "https:\/\/feeds.content.dowjones.io\/public\/rss\/RSSWorldNews",
             "name": "WSJ World"
         },
@@ -55,6 +47,50 @@
         {
             "url": "https:\/\/feeds.content.dowjones.io\/public\/rss\/WSJcomUSBusiness",
             "name": "WSJ US Business"
+        },
+        {
+            "url": "https:\/\/www.yahoo.com\/news\/rss",
+            "name": "Yahoo News"
+        },
+        {
+            "url": "https:\/\/www.chicagotribune.com\/feed\/",
+            "name": "Chicago Tribune"
+        },
+        {
+            "url": "https:\/\/feeds.bloomberg.com\/markets\/news.rss",
+            "name": "Bloomberg"
+        },
+        {
+            "url": "https:\/\/www.ft.com\/?format=rss",
+            "name": "FT"
+        },
+        {
+            "url": "https:\/\/www.forbes.com\/real-time\/feed2\/",
+            "name": "Forbes"
+        },
+        {
+            "url": "https:\/\/feeds.npr.org\/1001\/rss.xml",
+            "name": "NPR"
+        },
+        {
+            "url": "http:\/\/rss.cnn.com\/rss\/cnn_topstories.rss",
+            "name": "CNN"
+        },
+        {
+            "url": "https:\/\/feeds.marketwatch.com\/marketwatch\/topstories\/",
+            "name": "Market Watch"
+        },
+        {
+            "url": "https:\/\/www.propublica.org\/feeds\/propublica\/main",
+            "name": "ProPublica"
+        },
+        {
+            "url": "https:\/\/api.axios.com\/feed\/",
+            "name": "Axios"
+        },
+        {
+            "url": "https:\/\/thehill.com\/homenews\/feed\/",
+            "name": "The Hill"
         }
     ]
 }

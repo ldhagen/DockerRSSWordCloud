@@ -48,6 +48,15 @@ if (isset($_GET['ajax'])) {
             echo json_encode(search_articles($keyword, $feed));
             break;
             
+        case 'search_full_articles':
+            $keyword = $_GET['keyword'] ?? '';
+            $start_date = $_GET['start_date'] ?? null;
+            $end_date = $_GET['end_date'] ?? null;
+            $feed = $_GET['feed'] ?? null;
+            $scope = $_GET['scope'] ?? 'both';
+            echo json_encode(search_full_articles($keyword, $start_date, $end_date, $feed, $scope));
+            break;
+            
         case 'feed_list':
             echo json_encode(get_feed_list());
             break;
@@ -304,6 +313,55 @@ function search_articles($keyword, $feed = null) {
     }
 }
 
+function search_full_articles($keyword, $start_date = null, $end_date = null, $feed = null, $scope = 'both') {
+    $pdo = get_db();
+    if (!$pdo) return [];
+    
+    try {
+        $query = "SELECT title, link, description, feed_name, timestamp FROM articles WHERE 1=1";
+        $params = [];
+        
+        if ($keyword) {
+            $search = "%{$keyword}%";
+            if ($scope === 'title') {
+                $query .= " AND LOWER(title) LIKE LOWER(?)";
+                $params[] = $search;
+            } elseif ($scope === 'description') {
+                $query .= " AND LOWER(description) LIKE LOWER(?)";
+                $params[] = $search;
+            } else {
+                $query .= " AND (LOWER(title) LIKE LOWER(?) OR LOWER(description) LIKE LOWER(?))";
+                $params[] = $search;
+                $params[] = $search;
+            }
+        }
+        
+        if ($start_date) {
+            $query .= " AND timestamp >= ?";
+            $params[] = $start_date . " 00:00:00";
+        }
+        
+        if ($end_date) {
+            $query .= " AND timestamp <= ?";
+            $params[] = $end_date . " 23:59:59";
+        }
+        
+        if ($feed) {
+            $query .= " AND feed_name = ?";
+            $params[] = $feed;
+        }
+        
+        $query .= " ORDER BY timestamp DESC LIMIT 100";
+        
+        $stmt = $pdo->prepare($query);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    } catch (PDOException $e) {
+        error_log("Error in search_full_articles: " . $e->getMessage());
+        return [];
+    }
+}
+
 function get_feed_list() {
     $pdo = get_db();
     if (!$pdo) return [];
@@ -540,17 +598,26 @@ function get_time_filter($days) {
             font-weight: bold;
         }
         .search-results {
-            max-height: 400px;
+            max-height: 600px;
             overflow-y: auto;
+            border: 1px solid #eee;
+            border-radius: 4px;
+            margin-top: 15px;
         }
         .search-item {
-            padding: 12px;
+            padding: 15px;
             border-bottom: 1px solid #eee;
             cursor: pointer;
-            transition: background 0.2s;
+            transition: all 0.2s;
+            border-left: 4px solid transparent;
+        }
+        .search-item:last-child {
+            border-bottom: none;
         }
         .search-item:hover {
-            background: #f5f5f5;
+            background: #f8f9fa;
+            border-left: 4px solid #1976d2;
+            padding-left: 19px;
         }
         .loading {
             text-align: center;
@@ -664,7 +731,27 @@ function get_time_filter($days) {
                 <h3>Search Articles</h3>
                 <div class="controls">
                     <input type="text" id="searchInput" class="word-input" placeholder="Search by keyword...">
-                    <button onclick="searchArticles()" class="btn">Search</button>
+                    
+                    <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                        <div>
+                            <label for="startDate">From:</label>
+                            <input type="date" id="startDate" class="word-input" style="width: auto;">
+                        </div>
+                        <div>
+                            <label for="endDate">To:</label>
+                            <input type="date" id="endDate" class="word-input" style="width: auto;">
+                        </div>
+                        <div>
+                            <label for="searchScope">Scope:</label>
+                            <select id="searchScope">
+                                <option value="both">Title & Description</option>
+                                <option value="title">Title Only</option>
+                                <option value="description">Description Only</option>
+                            </select>
+                        </div>
+                        <button onclick="searchFullArticles()" class="btn">Search</button>
+                        <button onclick="clearArticleSearch()" class="btn btn-secondary">Clear</button>
+                    </div>
                 </div>
                 <div id="searchResults" class="search-results"></div>
             </div>
@@ -759,7 +846,7 @@ function get_time_filter($days) {
             });
             
             document.getElementById('searchInput').addEventListener('keypress', function(e) {
-                if (e.key === 'Enter') searchArticles();
+                if (e.key === 'Enter') searchFullArticles();
             });
         });
 
@@ -1191,41 +1278,65 @@ function get_time_filter($days) {
             closeModal('feedModal');
         }
 
-        function searchArticles() {
+        function searchFullArticles() {
             const keyword = document.getElementById('searchInput').value.trim();
+            const startDate = document.getElementById('startDate').value;
+            const endDate = document.getElementById('endDate').value;
+            const scope = document.getElementById('searchScope').value;
             const resultsContainer = document.getElementById('searchResults');
-            
-            if (!keyword) {
-                resultsContainer.innerHTML = '<p>Please enter a search term.</p>';
-                return;
-            }
             
             resultsContainer.innerHTML = '<div class="loading">Searching...</div>';
             
-            const url = `?ajax=search_articles&keyword=${encodeURIComponent(keyword)}` +
-                        (currentFilters.feed ? `&feed=${encodeURIComponent(currentFilters.feed)}` : '');
+            let url = `?ajax=search_full_articles&keyword=${encodeURIComponent(keyword)}&scope=${scope}`;
+            if (startDate) url += `&start_date=${startDate}`;
+            if (endDate) url += `&end_date=${endDate}`;
+            if (currentFilters.feed) url += `&feed=${encodeURIComponent(currentFilters.feed)}`;
             
             fetch(url)
                 .then(response => response.json())
                 .then(data => {
                     if (data.length === 0) {
-                        resultsContainer.innerHTML = '<p>No results found.</p>';
+                        resultsContainer.innerHTML = '<p>No articles found matching your criteria.</p>';
                         return;
                     }
                     
-                    let html = `<p><strong>${data.length} results found</strong></p>`;
+                    let html = `<p><strong>${data.length} articles found</strong></p>`;
+                    html += '<div style="margin-top: 10px;">';
                     
                     data.forEach(item => {
+                        const date = new Date(item.timestamp).toLocaleString();
                         html += `
-                            <div class="search-item">
-                                <strong>${item.feed_name}</strong><br>
-                                <small>${item.total_articles} articles • ${new Date(item.timestamp).toLocaleString()}</small>
+                            <div class="search-item" onclick="window.open('${item.link}', '_blank')" style="border-bottom: 1px solid #eee; padding: 15px; cursor: pointer; transition: background 0.2s;">
+                                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                                    <strong style="color: #1976d2; font-size: 1.1em;">${item.title}</strong>
+                                    <span style="font-size: 0.85em; color: #666; white-space: nowrap; margin-left: 10px;">${date}</span>
+                                </div>
+                                <div style="margin: 5px 0; color: #444; font-size: 0.95em;">
+                                    ${item.description ? (item.description.length > 200 ? item.description.substring(0, 200) + '...' : item.description) : 'No description available.'}
+                                </div>
+                                <div style="display: flex; gap: 10px; align-items: center;">
+                                    <span style="background: #e8f5e9; color: #2e7d32; padding: 2px 8px; border-radius: 4px; font-size: 0.8em;">${item.feed_name}</span>
+                                    <a href="${item.link}" target="_blank" onclick="event.stopPropagation();" style="font-size: 0.8em; color: #1976d2;">View Original</a>
+                                </div>
                             </div>
                         `;
                     });
                     
+                    html += '</div>';
                     resultsContainer.innerHTML = html;
+                })
+                .catch(error => {
+                    console.error('Error searching articles:', error);
+                    resultsContainer.innerHTML = '<p>Error occurred while searching. Check console for details.</p>';
                 });
+        }
+
+        function clearArticleSearch() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('startDate').value = '';
+            document.getElementById('endDate').value = '';
+            document.getElementById('searchScope').value = 'both';
+            document.getElementById('searchResults').innerHTML = '';
         }
 
         function closeModal(modalId) {

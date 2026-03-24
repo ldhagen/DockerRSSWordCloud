@@ -19,8 +19,8 @@ A comprehensive RSS feed analyzer that tracks word frequencies, generates intera
 - **Multi-Word Comparison**: Compare up to 5 words simultaneously on the same chart
 - **Feed-Specific Filtering**: Analyze data for specific RSS feeds
 - **Co-occurrence Detection**: Find related words that appear together
-- **Article Search**: Search through processed articles by keyword
-- **Feed Statistics**: View collection counts, article totals, and activity metrics
+- **Advanced Article Search**: Search through processed articles by keyword, date range, and scope (Title, Description, or both)
+- **Enhanced Search Results**: Results show article titles (linking to source), description snippets, publication dates, and source feeds.
 - **Interactive Modals**: Click-through details for words and feeds
 
 ### Word Cloud Visualization
@@ -190,9 +190,12 @@ Customize stopwords in the web interface or edit `data/stopwords.json`:
 - Switch between time ranges to see different patterns
 
 **Article Search**
-- Search through processed articles by keyword
-- Filter by specific feeds
-- View collection timestamps and article counts
+- Search through processed articles by keyword.
+- Filter by specific date range ("From" and "To" date pickers).
+- Choose search scope: "Title & Description", "Title Only", or "Description Only".
+- Automatically respects the global feed filter bar.
+- Direct links to source articles from search results.
+- Snippets of article descriptions provided for context.
 
 **Feed Statistics**
 - Click any feed to see top words for that feed
@@ -293,7 +296,8 @@ Analytics dashboard provides AJAX endpoints:
 - `?ajax=word_details&word=X&days=30` - Get word distribution by feed
 - `?ajax=feed_words&feed=X&days=30` - Get top words for specific feed
 - `?ajax=word_cooccurrence&word=X&days=30` - Get related words (co-occurrence)
-- `?ajax=search_articles&keyword=X&feed=X` - Search articles by keyword
+- `?ajax=search_full_articles&keyword=X&start_date=X&end_date=X&feed=X&scope=X` - Full article search with filters.
+- `?ajax=search_articles&keyword=X&feed=X` - Legacy search for collections by keyword.
 - `?ajax=feed_list` - Get list of all feeds
 
 All endpoints support the `days` parameter with values: 1, 2, 7, 14, 30, 90
@@ -630,6 +634,7 @@ For issues or questions:
 
 ## Version History
 
+- **v3.4** - Enhanced Article Search with date range filters, search scope (Title/Description), and improved results display.
 - **v3.3** - Implemented duplicate article detection via unique URL filtering to prevent inflated word frequencies and provided `rebuild_analytics.php` utility.
 - **v3.2** - Fixed database writing issues, including "readonly database" errors and SQL `GREATEST` function incompatibility with SQLite.
 - **v3.1** - Added 24h/48h time filters with hourly granularity and multi-word comparison feature
