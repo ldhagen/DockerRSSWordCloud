@@ -17,6 +17,9 @@ date_default_timezone_set($_ENV['PHP_TIMEZONE'] ?? 'UTC');
 
 // RSS parsing configuration
 define('TITLES_ONLY_ANALYSIS', true); // Set to false for full content analysis
+define('FETCH_RETRY_COUNT', 3);
+define('FETCH_RETRY_DELAY', 1); // seconds
+define('FETCH_TIMEOUT', 60); // seconds
 
 // Paths - Enhanced for Docker
 define('DATA_DIR', 'data');
@@ -55,7 +58,6 @@ function init_database() {
         $pdo = new PDO('sqlite:' . DATABASE_FILE);
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         
-        // Create tables
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS collections (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,7 +94,6 @@ function init_database() {
             )
         ");
         
-        // Create indexes for better performance
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_word_history_word ON word_history (word)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_word_history_timestamp ON word_history (timestamp)");
         $pdo->exec("CREATE INDEX IF NOT EXISTS idx_word_history_feed ON word_history (feed_name)");
@@ -106,7 +107,6 @@ function init_database() {
     }
 }
 
-// Get database connection
 function get_db() {
     static $pdo = null;
     if ($pdo === null) {
@@ -115,13 +115,11 @@ function get_db() {
     return $pdo;
 }
 
-// Simple HTML sanitization (keeping original function)
 function sanitize_output($string) {
     if ($string === null) return '';
     return htmlspecialchars($string, ENT_QUOTES, 'UTF-8');
 }
 
-// Enhanced JSON loading with backup
 function load_json($file, $default = []) {
     if (file_exists($file)) {
         $content = file_get_contents($file);
@@ -135,332 +133,166 @@ function load_json($file, $default = []) {
 }
 
 function save_json($file, $data) {
-    // Create backup before overwriting
     if (file_exists($file)) {
         copy($file, $file . '.bak.' . date('Y-m-d-H-i-s'));
     }
     file_put_contents($file, json_encode($data, JSON_PRETTY_PRINT));
 }
 
-// Enhanced RSS fetching with caching
+/**
+ * Enhanced RSS fetching with cURL, Retry logic, and Fast Fail
+ */
 function fetch_rss($url, $use_cache = true) {
     $cache_file = CACHE_DIR . '/' . md5($url) . '.xml';
-    $cache_time = 3600; // 1 hour cache
+    $cache_time = 3600; 
     
-    // Check cache if enabled
     if ($use_cache && file_exists($cache_file)) {
         if (time() - filemtime($cache_file) < $cache_time) {
             return file_get_contents($cache_file);
         }
     }
     
-    // Fetch from URL (keeping your original logic)
-    $context = stream_context_create([
-        'http' => [
-            'method' => 'GET',
-            'header' => "User-Agent: RSS Word Counter/2.0\r\n",
-            'timeout' => 30,
-            'follow_location' => 1,
-            'max_redirects' => 5
-        ],
-        'ssl' => [
-            'verify_peer' => false,
-            'verify_peer_name' => false,
-        ]
-    ]);
-    
-    try {
-        $response = @file_get_contents($url, false, $context);
-        if ($response !== false) {
-            // Cache the response
+    $attempts = 0;
+    while ($attempts < FETCH_RETRY_COUNT) {
+        $attempts++;
+        
+        $ch = curl_init();
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_FOLLOWLOCATION => true,
+            CURLOPT_MAXREDIRS => 5,
+            CURLOPT_TIMEOUT => FETCH_TIMEOUT,
+            CURLOPT_USERAGENT => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            CURLOPT_SSL_VERIFYPEER => false,
+            CURLOPT_ENCODING => "",
+        ]);
+
+        $response = curl_exec($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        $curl_error = curl_error($ch);
+        curl_close($ch);
+
+        if ($response !== false && $http_code === 200) {
             if ($use_cache) {
                 file_put_contents($cache_file, $response);
             }
             return $response;
         }
-    } catch (Exception $e) {
-        error_log("Failed to fetch RSS: " . $e->getMessage());
+
+        // Fast Fail Logic: Stop immediately on permission errors
+        if ($http_code === 403 || $http_code === 401) {
+            log_message("Fast Fail: Permission denied (HTTP $http_code) for $url. Skipping retries.", "WARNING");
+            break; 
+        }
+
+        log_message("Fetch attempt $attempts failed for $url: HTTP $http_code. Error: $curl_error", "ERROR");
+        
+        if ($attempts < FETCH_RETRY_COUNT) {
+            sleep(FETCH_RETRY_DELAY);
+        }
     }
     
     return false;
 }
 
-// Simple string to lowercase (keeping original)
 function str_lower($string) {
     return strtolower($string);
 }
 
-// Enhanced RSS parsing with configurable content selection
 function parse_rss_content($rss_content, $titles_only = true) {
     $content = '';
-    
-    // Remove CDATA sections
     $rss_content = preg_replace('/<!\[CDATA\[(.*?)\]\]>/is', '$1', $rss_content);
-    
-    // Decode HTML entities
     $rss_content = html_entity_decode($rss_content);
     
-    // Extract text between item tags
     if (preg_match_all('/<item>(.*?)<\/item>/is', $rss_content, $item_matches)) {
         foreach ($item_matches[1] as $item) {
-            // Always extract title
             if (preg_match('/<title>(.*?)<\/title>/is', $item, $title_match)) {
-                $title_text = strip_tags($title_match[1]);
-                $content .= ' ' . $title_text;
+                $content .= ' ' . strip_tags($title_match[1]);
             }
-            
-            // Extract additional content only if not titles_only
             if (!$titles_only) {
-                // Extract description
                 if (preg_match('/<description>(.*?)<\/description>/is', $item, $desc_match)) {
                     $content .= ' ' . strip_tags($desc_match[1]);
                 }
-                // Extract content:encoded
-                if (preg_match('/<content:encoded>(.*?)<\/content:encoded>/is', $item, $content_match)) {
-                    $content .= ' ' . strip_tags($content_match[1]);
-                }
-            }
-        }
-    } else {
-        // Try Atom format
-        if (preg_match_all('/<entry>(.*?)<\/entry>/is', $rss_content, $entry_matches)) {
-            foreach ($entry_matches[1] as $entry) {
-                // Always extract title
-                if (preg_match('/<title>(.*?)<\/title>/is', $entry, $title_match)) {
-                    $title_text = strip_tags($title_match[1]);
-                    $content .= ' ' . $title_text;
-                }
-                
-                // Extract additional content only if not titles_only
-                if (!$titles_only) {
-                    // Extract summary
-                    if (preg_match('/<summary>(.*?)<\/summary>/is', $entry, $summary_match)) {
-                        $content .= ' ' . strip_tags($summary_match[1]);
-                    }
-                    // Extract content
-                    if (preg_match('/<content>(.*?)<\/content>/is', $entry, $content_match)) {
-                        $content .= ' ' . strip_tags($content_match[1]);
-                    }
-                }
             }
         }
     }
-    
     return $content;
 }
 
-// Enhanced article extraction (keeping your original logic)
 function extract_articles($rss_content, $feed_name) {
     $articles = [];
-    
-    // Remove CDATA sections and decode entities
     $rss_content = preg_replace('/<!\[CDATA\[(.*?)\]\]>/is', '$1', $rss_content);
     $rss_content = html_entity_decode($rss_content);
     
-    // Extract items
     if (preg_match_all('/<item>(.*?)<\/item>/is', $rss_content, $item_matches)) {
         foreach ($item_matches[1] as $item) {
-            $article = [
-                'title' => '',
-                'link' => '',
-                'description' => '',
-                'feed' => $feed_name,
-                'pub_date' => ''
-            ];
-            
-            // Extract title
-            if (preg_match('/<title>(.*?)<\/title>/is', $item, $title_match)) {
-                $article['title'] = trim(strip_tags($title_match[1]));
-            }
-            
-            // Extract link
-            if (preg_match('/<link>(.*?)<\/link>/is', $item, $link_match)) {
-                $article['link'] = trim(strip_tags($link_match[1]));
-            }
-            
-            // Extract description
-            if (preg_match('/<description>(.*?)<\/description>/is', $item, $desc_match)) {
-                $article['description'] = trim(strip_tags($desc_match[1]));
-            }
-            
-            // Extract publication date
-            if (preg_match('/<pubDate>(.*?)<\/pubDate>/is', $item, $date_match)) {
-                $article['pub_date'] = trim(strip_tags($date_match[1]));
-            }
-            
-            // Only add if it has a title
-            if (!empty($article['title'])) {
-                $articles[] = $article;
-            }
-        }
-    } else {
-        // Try Atom format
-        if (preg_match_all('/<entry>(.*?)<\/entry>/is', $rss_content, $entry_matches)) {
-            foreach ($entry_matches[1] as $entry) {
-                $article = [
-                    'title' => '',
-                    'link' => '',
-                    'description' => '',
-                    'feed' => $feed_name,
-                    'pub_date' => ''
-                ];
-                
-                // Extract title
-                if (preg_match('/<title>(.*?)<\/title>/is', $entry, $title_match)) {
-                    $article['title'] = trim(strip_tags($title_match[1]));
-                }
-                
-                // Extract link
-                if (preg_match('/<link.*?href="(.*?)".*?>/is', $entry, $link_match)) {
-                    $article['link'] = trim($link_match[1]);
-                }
-                
-                // Extract summary
-                if (preg_match('/<summary>(.*?)<\/summary>/is', $entry, $summary_match)) {
-                    $article['description'] = trim(strip_tags($summary_match[1]));
-                }
-                
-                // Extract published date
-                if (preg_match('/<published>(.*?)<\/published>/is', $entry, $date_match)) {
-                    $article['pub_date'] = trim(strip_tags($date_match[1]));
-                }
-                
-                // Only add if it has a title
-                if (!empty($article['title'])) {
-                    $articles[] = $article;
-                }
-            }
+            $article = ['title' => '', 'link' => '', 'description' => '', 'feed' => $feed_name, 'pub_date' => ''];
+            if (preg_match('/<title>(.*?)<\/title>/is', $item, $title_match)) $article['title'] = trim(strip_tags($title_match[1]));
+            if (preg_match('/<link>(.*?)<\/link>/is', $item, $link_match)) $article['link'] = trim(strip_tags($link_match[1]));
+            if (preg_match('/<description>(.*?)<\/description>/is', $item, $desc_match)) $article['description'] = trim(strip_tags($desc_match[1]));
+            if (preg_match('/<pubDate>(.*?)<\/pubDate>/is', $item, $date_match)) $article['pub_date'] = trim(strip_tags($date_match[1]));
+            if (!empty($article['title'])) $articles[] = $article;
         }
     }
-    
     return $articles;
 }
 
-/**
- * Filters a list of articles to only those not already in the database
- * for this specific feed.
- */
 function filter_new_articles($articles, $feed_name) {
     $pdo = get_db();
     if (!$pdo || empty($articles)) return $articles;
-    
     $new_articles = [];
-    
-    // Prepare statement once for performance
     $stmt = $pdo->prepare("SELECT COUNT(*) FROM articles WHERE link = ? AND feed_name = ?");
-    
     foreach ($articles as $article) {
         $stmt->execute([$article['link'], $feed_name]);
-        if ($stmt->fetchColumn() == 0) {
-            $new_articles[] = $article;
-        }
+        if ($stmt->fetchColumn() == 0) $new_articles[] = $article;
     }
-    
     return $new_articles;
 }
 
-/**
- * Generates text content for word counting from an array of articles
- */
 function get_content_from_articles($articles, $titles_only = true) {
     $content = '';
     foreach ($articles as $article) {
         $content .= ' ' . $article['title'];
-        if (!$titles_only && !empty($article['description'])) {
-            $content .= ' ' . $article['description'];
-        }
+        if (!$titles_only && !empty($article['description'])) $content .= ' ' . $article['description'];
     }
     return $content;
 }
 
-// Enhanced word counting
 function count_words($text, $stopwords) {
-    if (empty($text)) {
-        return [];
-    }
-    
-    // Convert to lowercase
+    if (empty($text)) return [];
     $text = str_lower($text);
-    
-    // Remove punctuation and numbers
     $text = preg_replace('/[^a-z\s]/', ' ', $text);
-    
-    // Split into words
     $words = preg_split('/\s+/', $text, -1, PREG_SPLIT_NO_EMPTY);
-    
-    // Count words, excluding stopwords
     $word_counts = [];
     foreach ($words as $word) {
         $word = trim($word);
-        if (empty($word) || in_array($word, $stopwords) || strlen($word) < 2 || is_numeric($word)) {
-            continue;
-        }
-        
-        if (!isset($word_counts[$word])) {
-            $word_counts[$word] = 0;
-        }
+        if (empty($word) || in_array($word, $stopwords) || strlen($word) < 2 || is_numeric($word)) continue;
+        if (!isset($word_counts[$word])) $word_counts[$word] = 0;
         $word_counts[$word]++;
     }
-    
-    // Sort by count descending
     arsort($word_counts);
     return $word_counts;
 }
 
-// Store collection data to database - ENHANCED VERSION
 function store_collection_data($feed_name, $articles, $word_counts) {
     $pdo = get_db();
-    if (!$pdo) {
-        error_log("store_collection_data: No database connection");
-        return false;
-    }
-    
+    if (!$pdo) return false;
     try {
         $pdo->beginTransaction();
-        
-        // Insert collection record
-        $stmt = $pdo->prepare("
-            INSERT INTO collections (feed_name, total_articles, total_words) 
-            VALUES (?, ?, ?)
-        ");
-        $total_words = array_sum($word_counts);
-        $stmt->execute([$feed_name, count($articles), $total_words]);
+        $stmt = $pdo->prepare("INSERT INTO collections (feed_name, total_articles, total_words) VALUES (?, ?, ?)");
+        $stmt->execute([$feed_name, count($articles), array_sum($word_counts)]);
         $collection_id = $pdo->lastInsertId();
         
-        // Insert word history - BATCH INSERT for better performance
         if (!empty($word_counts)) {
-            $stmt = $pdo->prepare("
-                INSERT INTO word_history (collection_id, word, count, feed_name) 
-                VALUES (?, ?, ?, ?)
-            ");
-            
-            $batch_count = 0;
-            foreach ($word_counts as $word => $count) {
-                $stmt->execute([$collection_id, $word, $count, $feed_name]);
-                $batch_count++;
-            }
-            
-            error_log("Stored $batch_count words for collection $collection_id ($feed_name)");
+            $stmt = $pdo->prepare("INSERT INTO word_history (collection_id, word, count, feed_name) VALUES (?, ?, ?, ?)");
+            foreach ($word_counts as $word => $count) $stmt->execute([$collection_id, $word, $count, $feed_name]);
         }
         
-        // Insert articles
         if (!empty($articles)) {
-            $stmt = $pdo->prepare("
-                INSERT INTO articles (collection_id, title, link, description, feed_name, pub_date) 
-                VALUES (?, ?, ?, ?, ?, ?)
-            ");
-            foreach ($articles as $article) {
-                $stmt->execute([
-                    $collection_id,
-                    $article['title'],
-                    $article['link'],
-                    $article['description'],
-                    $article['feed'],
-                    $article['pub_date'] ?? null
-                ]);
-            }
+            $stmt = $pdo->prepare("INSERT INTO articles (collection_id, title, link, description, feed_name, pub_date) VALUES (?, ?, ?, ?, ?, ?)");
+            foreach ($articles as $article) $stmt->execute([$collection_id, $article['title'], $article['link'], $article['description'], $article['feed'], $article['pub_date']]);
         }
-        
         $pdo->commit();
         return $collection_id;
     } catch (PDOException $e) {
@@ -470,18 +302,15 @@ function store_collection_data($feed_name, $articles, $word_counts) {
     }
 }
 
-// Get word trends over time
 function get_word_trends($word, $days = 30, $feed = null) {
     $pdo = get_db();
     if (!$pdo) return [];
-    
     try {
         if ($feed) {
             $stmt = $pdo->prepare("
-                SELECT DATE(timestamp) as date, SUM(count) as total_count
+                SELECT DATE(timestamp) as date, SUM(count) as total_count 
                 FROM word_history 
-                WHERE LOWER(word) = LOWER(?) 
-                AND feed_name = ?
+                WHERE LOWER(word) = LOWER(?) AND feed_name = ?
                 AND timestamp > datetime('now', '-' || ? || ' days')
                 GROUP BY DATE(timestamp)
                 ORDER BY date
@@ -489,7 +318,7 @@ function get_word_trends($word, $days = 30, $feed = null) {
             $stmt->execute([$word, $feed, $days]);
         } else {
             $stmt = $pdo->prepare("
-                SELECT DATE(timestamp) as date, SUM(count) as total_count
+                SELECT DATE(timestamp) as date, SUM(count) as total_count 
                 FROM word_history 
                 WHERE LOWER(word) = LOWER(?)
                 AND timestamp > datetime('now', '-' || ? || ' days')
@@ -505,11 +334,9 @@ function get_word_trends($word, $days = 30, $feed = null) {
     }
 }
 
-// Get trending words
 function get_trending_words($days = 7, $limit = 20) {
     $pdo = get_db();
     if (!$pdo) return [];
-    
     try {
         $stmt = $pdo->prepare("
             SELECT word, SUM(count) as total_count, COUNT(DISTINCT feed_name) as feed_count
@@ -528,14 +355,11 @@ function get_trending_words($days = 7, $limit = 20) {
     }
 }
 
-// Logging function
 function log_message($message, $level = 'INFO') {
     $log_file = LOGS_DIR . '/analyzer.log';
     $timestamp = date('Y-m-d H:i:s');
-    $log_entry = "[$timestamp] [$level] $message\n";
-    file_put_contents($log_file, $log_entry, FILE_APPEND | LOCK_EX);
+    file_put_contents($log_file, "[$timestamp] [$level] $message\n", FILE_APPEND | LOCK_EX);
 }
 
-// Initialize database on first load
 init_database();
 ?>

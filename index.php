@@ -100,6 +100,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         
         foreach ($feeds_data['feeds'] as $index => $feed) {
             if (empty($selected_feeds) || in_array($index, $selected_feeds)) {
+                // Extend execution time for each feed
+                set_time_limit(60);
+                
                 $start_time = microtime(true);
                 $rss_content = fetch_rss($feed['url'], $use_cache);
                 
